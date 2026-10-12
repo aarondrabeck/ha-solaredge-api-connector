@@ -3,11 +3,11 @@
   "name": "SolarEdge API Connector",
   "codeowners": ["@aarondrabeck"],
   "config_flow": true,
-  "dependencies": ["application_credentials", "recorder"],
+  "dependencies": ["application_credentials", "http", "recorder"],
   "documentation": "https://github.com/aarondrabeck/ha-solaredge-api-connector",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/aarondrabeck/ha-solaredge-api-connector/issues",
   "requirements": [],
-  "version": "0.1.3"
+  "version": "0.1.4"
 }

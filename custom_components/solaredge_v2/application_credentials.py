@@ -23,6 +23,7 @@ from homeassistant.helpers import config_entry_oauth2_flow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DEVELOPER_PORTAL_URL, OAUTH2_AUTHORIZE, OAUTH2_TOKEN
+from .oauth import callback_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,5 +101,5 @@ async def async_get_description_placeholders(hass: HomeAssistant) -> dict[str, s
     """Placeholders for the application credentials dialog."""
     return {
         "developer_url": DEVELOPER_PORTAL_URL,
-        "redirect_url": "https://my.home-assistant.io/redirect/oauth",
+        "redirect_url": callback_url(hass),
     }

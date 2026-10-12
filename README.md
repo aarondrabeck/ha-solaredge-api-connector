@@ -51,20 +51,24 @@ Requires Home Assistant **2026.10** or newer.
 1. Sign in at <https://developer.solaredge.com> with your **mySolarEdge / monitoring credentials**, and complete the developer profile. The Free tier is provisioned automatically.
 2. **Create Application** → Service: *Monitoring API* → Access type: **Site Access**.
 3. OAuth settings:
-   - **Origin URL:** your Home Assistant external URL.
-   - **Redirect URI:** `https://my.home-assistant.io/redirect/oauth`
+   - **Origin URL:** your Home Assistant address, e.g. `https://<your HA address>`.
+   - **Redirect URI** and **Returned URL**: both set to `https://<your HA address>/auth/solaredge_v2/callback`. The setup dialog shows the exact address to copy.
    - **Scopes:** `SITE_DATA` and `DEVICE_DATA`
 4. Copy the **Client ID** and **Client Secret**. The secret is shown only once.
+
+> Your Home Assistant only has to be reachable from the browser you sign in with, not from the internet. A local address such as `http://homeassistant.local:8123` works if that's how you open HA.
 
 ### 2. Add the integration
 
 1. Settings → Devices & services → **Add integration** → *SolarEdge API Connector*.
 2. Enter the Client ID and Client Secret when asked. You can also add them first under *Application credentials*.
-3. Select **Open website**. A new tab opens. Sign in with your **homeowner** account and approve access (the grant lasts 24 months).
-4. The tab returns to Home Assistant and closes itself, and the dialog moves on by itself.
-5. Enter your **site ID**. It is shown in the mySolarEdge app and the monitoring portal URL.
+3. The dialog shows the callback address to register in your SolarEdge app (step 1.3). Choose **Sign in automatically**.
+4. A SolarEdge tab opens. Sign in with your **homeowner** account and approve access (the grant lasts 24 months).
+5. SolarEdge sends the tab to the callback, which says *connected* and closes. The dialog finishes on its own, and the site ID is picked up automatically.
 
-> Fallback: if SolarEdge refuses the code, the dialog shows its error and a form. Sign in again with the link there and paste the full address of the tab you are sent back to (it contains `code=` and `site_id=`).
+> **Manual sign-in:** choose **Sign in manually**, open the sign-in link, approve, then paste the full address of the tab SolarEdge sends you back to (it contains `code=` and `site_id=`). If Home Assistant rewrites the address, it is still in your browser history.
+
+> **Why not my.home-assistant.io?** Home Assistant's standard OAuth callback and my.home-assistant.io both require the provider to return a `state` value. SolarEdge doesn't, and it redirects to the app's *Returned URL*. So the integration serves its own callback, like the core Plex integration does, and matches the sign-in using SolarEdge's `external_id`.
 
 ### 3. Options (Configure)
 
@@ -135,6 +139,7 @@ Remove the old `rest:` block, and revoke the Beta keys if you can.
 - **Diagnostics** (device page → Download diagnostics) show the credit ledger, the current poll plan, capability flags, the latest values and the raw battery telemetry units. Tokens are redacted.
 - **Credit counter:** the integration counts its own calls (1 per request) and resets on your billing day. SolarEdge only reports the remaining balance in the developer console, so calls from other apps on the same developer account are not included.
 - **"Credits exhausted" repair:** the developer account hit its monthly limit. Lower the budget or check for other apps on the account.
+- **Landed on the Home Assistant dashboard after approving?** The *Returned URL* in your SolarEdge app points at your HA root. Set it, and the Redirect URI, to the callback address shown in the setup dialog, or use manual sign-in.
 - **Reauthentication requested:** the 24-month grant expired or was revoked. Sign in again from the notification.
 
 ## Development

@@ -1,15 +1,27 @@
 {
   "application_credentials": {
-    "description": "Create a **Site Access** application at [{developer_url}]({developer_url}) with scopes `SITE_DATA` and `DEVICE_DATA` and Redirect URI `{redirect_url}`, then enter its Client ID and Client Secret here."
+    "description": "Create a **Site Access** application at [{developer_url}]({developer_url}) with scopes SITE_DATA and DEVICE_DATA. Set both its **Redirect URI** and **Returned URL** to {redirect_url} (the exact address is shown again in the next step). Then enter its Client ID and Client Secret here."
   },
   "config": {
     "step": {
       "pick_implementation": {
         "title": "[%key:common::config_flow::title::oauth2_pick_implementation%]"
       },
+      "sign_in": {
+        "title": "Sign in to SolarEdge",
+        "description": "SolarEdge sends you back to the address registered in your SolarEdge app. Set both its **Redirect URI** and **Returned URL** to:\n\n{callback_url}\n\nThis must be the Home Assistant address you are using right now. It only has to be reachable from this browser, not from the internet.",
+        "menu_options": {
+          "authorize": "Sign in automatically (recommended)",
+          "paste": "Sign in manually (paste the address)"
+        }
+      },
+      "authorize": {
+        "title": "Sign in to SolarEdge",
+        "description": "Approve access in the SolarEdge tab. It returns here and closes by itself. If you end up on your Home Assistant dashboard instead, the Returned URL in your SolarEdge app is not set to the callback address. Close this dialog and use manual sign-in, or fix the app settings."
+      },
       "paste": {
-        "title": "Finish signing in",
-        "description": "Sign-in did not complete automatically.\n\n1. **[Open SolarEdge sign-in]({authorize_url})** again and approve access.\n2. Paste the full address of the tab SolarEdge sends you back to (it contains code= and site_id=). If that tab closes by itself, leave the field empty.\n3. Select **Submit**.",
+        "title": "Sign in manually",
+        "description": "1. **[Open SolarEdge sign-in]({authorize_url})** and approve access.\n2. Copy the full address of the tab SolarEdge sends you back to (it contains code= and site_id=). If Home Assistant changes the address, find it in your browser history.\n3. Paste it below and select **Submit**.",
         "data": {
           "redirect_url": "Address you were sent back to"
         },
