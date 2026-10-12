@@ -1,7 +1,7 @@
-# SolarEdge V2 for Home Assistant
+# SolarEdge API Connector for Home Assistant
 
-[![Validate](https://github.com/aarondrabeck/ha-solaredge-v2/actions/workflows/validate.yml/badge.svg)](https://github.com/aarondrabeck/ha-solaredge-v2/actions/workflows/validate.yml)
-[![Tests](https://github.com/aarondrabeck/ha-solaredge-v2/actions/workflows/tests.yml/badge.svg)](https://github.com/aarondrabeck/ha-solaredge-v2/actions/workflows/tests.yml)
+[![Validate](https://github.com/aarondrabeck/ha-solaredge-api-connector/actions/workflows/validate.yml/badge.svg)](https://github.com/aarondrabeck/ha-solaredge-api-connector/actions/workflows/validate.yml)
+[![Tests](https://github.com/aarondrabeck/ha-solaredge-api-connector/actions/workflows/tests.yml/badge.svg)](https://github.com/aarondrabeck/ha-solaredge-api-connector/actions/workflows/tests.yml)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
 
 A custom integration for the **SolarEdge ONE Developer Platform** (Monitoring API v2) that is careful with API credits.
@@ -39,8 +39,8 @@ The ledger counts only this integration's calls. If other apps share your develo
 
 ## Installation (HACS)
 
-1. HACS → ⋮ → **Custom repositories** → add `https://github.com/aarondrabeck/ha-solaredge-v2`, category **Integration**.
-2. Install **SolarEdge V2** and restart Home Assistant.
+1. HACS → ⋮ → **Custom repositories** → add `https://github.com/aarondrabeck/ha-solaredge-api-connector`, category **Integration**.
+2. Install **SolarEdge API Connector** and restart Home Assistant.
 
 Requires Home Assistant **2026.10** or newer.
 
@@ -58,7 +58,7 @@ Requires Home Assistant **2026.10** or newer.
 
 ### 2. Add the integration
 
-1. Settings → Devices & services → **Add integration** → *SolarEdge V2*.
+1. Settings → Devices & services → **Add integration** → *SolarEdge API Connector*.
 2. Enter the Client ID and Client Secret when asked. You can also add them first under *Application credentials*.
 3. Select **Open website**. A new tab opens. Sign in with your **homeowner** account and approve access (the grant lasts 24 months).
 4. The tab returns to Home Assistant and closes itself, and the dialog moves on by itself.

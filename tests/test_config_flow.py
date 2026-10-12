@@ -1,4 +1,4 @@
-"""Tests for the SolarEdge V2 config flow."""
+"""Tests for the SolarEdge API Connector config flow."""
 
 from __future__ import annotations
 

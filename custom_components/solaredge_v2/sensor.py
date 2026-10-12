@@ -1,4 +1,4 @@
-"""Sensors for SolarEdge V2."""
+"""Sensors for SolarEdge API Connector."""
 
 from __future__ import annotations
 

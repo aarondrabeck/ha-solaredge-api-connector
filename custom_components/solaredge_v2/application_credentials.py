@@ -1,4 +1,4 @@
-"""Application credentials for SolarEdge V2 (OAuth 2.0 Site Access)."""
+"""Application credentials for SolarEdge API Connector (OAuth 2.0 Site Access)."""
 
 from __future__ import annotations
 

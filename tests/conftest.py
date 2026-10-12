@@ -1,4 +1,4 @@
-"""Shared fixtures for SolarEdge V2 tests."""
+"""Shared fixtures for SolarEdge API Connector tests."""
 
 from __future__ import annotations
 

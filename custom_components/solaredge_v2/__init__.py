@@ -1,4 +1,4 @@
-"""SolarEdge V2: SolarEdge ONE Developer Platform (Monitoring API v2) for Home Assistant."""
+"""SolarEdge API Connector: SolarEdge Monitoring API v2 for Home Assistant."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ type SolarEdgeConfigEntry = ConfigEntry[SolarEdgeCoordinator]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: SolarEdgeConfigEntry) -> bool:
-    """Set up SolarEdge V2 from a config entry."""
+    """Set up SolarEdge API Connector from a config entry."""
     try:
         implementation = await async_get_config_entry_implementation(hass, entry)
     except ImplementationUnavailableError as err:

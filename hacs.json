@@ -1,5 +1,5 @@
 {
-  "name": "SolarEdge V2",
+  "name": "SolarEdge API Connector",
   "homeassistant": "2026.10.0",
   "render_readme": true
 }

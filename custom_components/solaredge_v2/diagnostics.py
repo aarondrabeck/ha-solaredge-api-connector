@@ -1,4 +1,4 @@
-"""Diagnostics for SolarEdge V2."""
+"""Diagnostics for SolarEdge API Connector."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Constants for the SolarEdge V2 integration."""
+"""Constants for the SolarEdge API Connector integration."""
 
 from __future__ import annotations
 

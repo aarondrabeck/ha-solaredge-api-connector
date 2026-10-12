@@ -1,4 +1,4 @@
-"""Credit-aware data coordinator for SolarEdge V2."""
+"""Credit-aware data coordinator for SolarEdge API Connector."""
 
 from __future__ import annotations
 
