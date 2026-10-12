@@ -7,6 +7,16 @@
       "pick_implementation": {
         "title": "Pick authentication method"
       },
+      "auth": {
+        "title": "Sign in to SolarEdge",
+        "description": "1. **[Open SolarEdge sign-in]({authorize_url})** (opens a new tab). Sign in with your mySolarEdge homeowner account and approve access.\n2. After approving you are sent back to Home Assistant. If that tab shows a blank page or an error, copy the **full address** from its address bar and paste it below.\n3. Select **Submit**. If the tab closed by itself, you can leave the field empty.",
+        "data": {
+          "redirect_url": "Address you were sent back to"
+        },
+        "data_description": {
+          "redirect_url": "The full address from the address bar of the tab SolarEdge sent you back to. It contains code= and site_id=."
+        }
+      },
       "site": {
         "title": "SolarEdge site",
         "description": "Enter the site ID you just granted access to. It is shown in the mySolarEdge app and in the monitoring portal URL.",
@@ -20,6 +30,9 @@
       }
     },
     "error": {
+      "missing_code": "No authorization code found. Use the sign-in link, then paste the full address you were sent back to.",
+      "authorize_rejected": "Access was declined at SolarEdge.",
+      "oauth_failed": "SolarEdge did not accept the authorization code. Codes are single-use and expire quickly: sign in again with the link and paste the new address.",
       "invalid_site": "This site was not found or the authorization does not cover it.",
       "invalid_auth": "Invalid authentication",
       "cannot_connect": "Failed to connect"
@@ -34,7 +47,8 @@
       "oauth_timeout": "Timeout resolving OAuth token.",
       "oauth_unauthorized": "OAuth authorization error while obtaining access token.",
       "oauth_failed": "Error while obtaining access token.",
-      "user_rejected_authorize": "Account linking rejected."
+      "user_rejected_authorize": "Account linking rejected.",
+      "wrong_site": "You signed in to a different site than the one this entry is for."
     },
     "create_entry": {
       "default": "Successfully authenticated"
@@ -62,17 +76,39 @@
   },
   "entity": {
     "sensor": {
-      "solar_power": { "name": "Solar power" },
-      "home_power": { "name": "Home power" },
-      "grid_power": { "name": "Grid power" },
-      "grid_import_power": { "name": "Grid import power" },
-      "grid_export_power": { "name": "Grid export power" },
-      "battery_power": { "name": "Battery power" },
-      "battery_charge_power": { "name": "Battery charge power" },
-      "battery_discharge_power": { "name": "Battery discharge power" },
-      "battery_state_of_charge": { "name": "Battery state of charge" },
-      "battery_remaining_energy": { "name": "Battery remaining energy" },
-      "battery_usable_capacity": { "name": "Battery usable capacity" },
+      "solar_power": {
+        "name": "Solar power"
+      },
+      "home_power": {
+        "name": "Home power"
+      },
+      "grid_power": {
+        "name": "Grid power"
+      },
+      "grid_import_power": {
+        "name": "Grid import power"
+      },
+      "grid_export_power": {
+        "name": "Grid export power"
+      },
+      "battery_power": {
+        "name": "Battery power"
+      },
+      "battery_charge_power": {
+        "name": "Battery charge power"
+      },
+      "battery_discharge_power": {
+        "name": "Battery discharge power"
+      },
+      "battery_state_of_charge": {
+        "name": "Battery state of charge"
+      },
+      "battery_remaining_energy": {
+        "name": "Battery remaining energy"
+      },
+      "battery_usable_capacity": {
+        "name": "Battery usable capacity"
+      },
       "grid_status": {
         "name": "Grid status",
         "state": {
@@ -89,17 +125,42 @@
           "idle": "Idle"
         }
       },
-      "solar_energy": { "name": "Solar energy" },
-      "home_energy": { "name": "Home energy" },
-      "grid_import_energy": { "name": "Grid import energy" },
-      "grid_export_energy": { "name": "Grid export energy" },
-      "battery_charge_energy": { "name": "Battery charge energy" },
-      "battery_discharge_energy": { "name": "Battery discharge energy" },
-      "credits_used": { "name": "API credits used", "unit_of_measurement": "credits" },
-      "credits_remaining": { "name": "API credits remaining", "unit_of_measurement": "credits" },
-      "credits_projected": { "name": "API credits projected", "unit_of_measurement": "credits" },
-      "data_timestamp": { "name": "Data timestamp" },
-      "next_update": { "name": "Next API update" }
+      "solar_energy": {
+        "name": "Solar energy"
+      },
+      "home_energy": {
+        "name": "Home energy"
+      },
+      "grid_import_energy": {
+        "name": "Grid import energy"
+      },
+      "grid_export_energy": {
+        "name": "Grid export energy"
+      },
+      "battery_charge_energy": {
+        "name": "Battery charge energy"
+      },
+      "battery_discharge_energy": {
+        "name": "Battery discharge energy"
+      },
+      "credits_used": {
+        "name": "API credits used",
+        "unit_of_measurement": "credits"
+      },
+      "credits_remaining": {
+        "name": "API credits remaining",
+        "unit_of_measurement": "credits"
+      },
+      "credits_projected": {
+        "name": "API credits projected",
+        "unit_of_measurement": "credits"
+      },
+      "data_timestamp": {
+        "name": "Data timestamp"
+      },
+      "next_update": {
+        "name": "Next API update"
+      }
     }
   },
   "issues": {

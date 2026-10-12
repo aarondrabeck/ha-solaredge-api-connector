@@ -60,8 +60,11 @@ Requires Home Assistant **2026.10** or newer.
 
 1. Settings → Devices & services → **Add integration** → *SolarEdge V2*.
 2. Enter the Client ID and Client Secret when asked. You can also add them first under *Application credentials*.
-3. Sign in to SolarEdge with your **homeowner** account and approve access. The grant lasts 24 months.
-4. Enter your **site ID**. It's shown in the mySolarEdge app and in the monitoring portal URL. SolarEdge sends it back on the redirect, but Home Assistant's OAuth callback doesn't pass it through, so you enter it yourself.
+3. The dialog shows an **Open SolarEdge sign-in** link. It opens a new tab. Sign in with your **homeowner** account and approve access (the grant lasts 24 months).
+4. SolarEdge sends that tab back to Home Assistant. If the tab shows a blank page or an error, copy its **full address** (it contains `code=` and `site_id=`) and paste it into the dialog, then select **Submit**. Pasting also fills in the site ID for you.
+   If you land on Home Assistant's callback and the tab closes by itself, leave the field empty and select **Submit**; you will then be asked for the site ID.
+
+> The authorization code is single-use and expires quickly. If Submit reports it was rejected, use the link again and paste the new address.
 
 ### 3. Options (Configure)
 

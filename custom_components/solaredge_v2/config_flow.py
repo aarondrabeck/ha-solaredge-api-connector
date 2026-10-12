@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
+from aiohttp import ClientError
 from homeassistant.config_entries import (
     SOURCE_REAUTH,
     ConfigFlowResult,
     OptionsFlowWithReload,
 )
 from homeassistant.core import callback
+from homeassistant.exceptions import OAuth2TokenRequestError
 from homeassistant.helpers import config_entry_oauth2_flow, selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.network import NoURLAvailableError
 import voluptuous as vol
+from yarl import URL
 
 from .api import (
     SolarEdgeAuthError,
@@ -41,6 +47,19 @@ from .const import (
 if TYPE_CHECKING:
     from . import SolarEdgeConfigEntry
 
+CONF_REDIRECT_URL = "redirect_url"
+
+
+def parse_redirect(value: str) -> dict[str, str]:
+    """Read ``code``/``site_id``/``error`` from a pasted redirect URL (or a bare code)."""
+    value = value.strip()
+    if not value:
+        return {}
+    if "=" not in value and "/" not in value:
+        return {"code": value}
+    query = URL(value).query if "?" in value else URL(f"?{value.lstrip('?')}").query
+    return {key: query[key] for key in ("code", "site_id", "error") if query.get(key)}
+
 
 class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, domain=DOMAIN):
     """Authorize with SolarEdge, then pick the site the grant covers."""
@@ -49,6 +68,9 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
     VERSION = 1
 
     _oauth_data: dict[str, Any]
+    _authorize_url: str | None = None
+    _callback_code: str | None = None
+    _site_from_redirect: int | None = None
 
     @property
     def logger(self) -> logging.Logger:
@@ -66,13 +88,84 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
         """Return the options flow."""
         return SolarEdgeOptionsFlow()
 
+    async def async_step_auth(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Sign in at SolarEdge, then finish from the callback or a pasted redirect URL.
+
+        HA's callback needs ``state`` echoed back and drops ``site_id``; SolarEdge's
+        redirect may omit the former. A form with the sign-in link and an optional
+        "paste the address you landed on" field works in every case.
+        """
+        errors: dict[str, str] = {}
+        if user_input is not None and "state" in user_input:
+            # HA's OAuth callback view resumed us; keep the code until Submit.
+            self._callback_code = user_input.get("code")
+            if "error" in user_input:
+                errors["base"] = "authorize_rejected"
+        elif user_input is not None:
+            params = parse_redirect(user_input.get(CONF_REDIRECT_URL, ""))
+            code = params.get("code") or self._callback_code
+            if "error" in params:
+                errors["base"] = "authorize_rejected"
+            elif not code:
+                errors["base"] = "missing_code"
+            else:
+                site = params.get("site_id", "")
+                self._site_from_redirect = int(site) if site.isdigit() else None
+                try:
+                    return await self._async_exchange_code(code)
+                except (
+                    OAuth2TokenRequestError,
+                    ClientError,
+                    TimeoutError,
+                    KeyError,
+                    ValueError,
+                ) as err:
+                    self.logger.warning("SolarEdge token exchange failed: %s", err)
+                    self._callback_code = None
+                    errors["base"] = "oauth_failed"
+
+        if self._authorize_url is None:
+            try:
+                async with asyncio.timeout(30):
+                    self._authorize_url = await self.async_generate_authorize_url()
+            except TimeoutError:
+                return self.async_abort(reason="authorize_url_timeout")
+            except NoURLAvailableError:
+                return self.async_abort(reason="no_url_available")
+
+        return self.async_show_form(
+            step_id="auth",
+            data_schema=vol.Schema(
+                {vol.Optional(CONF_REDIRECT_URL): selector.TextSelector()},
+                # The OAuth callback view submits state/code to this step.
+                extra=vol.ALLOW_EXTRA,
+            ),
+            description_placeholders={"authorize_url": self._authorize_url},
+            errors=errors,
+        )
+
+    async def _async_exchange_code(self, code: str) -> ConfigFlowResult:
+        redirect_uri = getattr(self.flow_impl, "redirect_uri", None)
+        async with asyncio.timeout(30):
+            token = await self.flow_impl.async_resolve_external_data(
+                {"code": code, "state": {"redirect_uri": redirect_uri}}
+            )
+        token["expires_in"] = int(token["expires_in"])
+        token["expires_at"] = time.time() + token["expires_in"]
+        return await self.async_oauth_create_entry(
+            {"auth_implementation": self.flow_impl.domain, "token": token}
+        )
+
     async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:
         """Store the token; reauth finishes here, setup continues to the site step."""
         if self.source == SOURCE_REAUTH:
-            return self.async_update_reload_and_abort(
-                self._get_reauth_entry(), data_updates={"token": data["token"]}
-            )
+            entry = self._get_reauth_entry()
+            if self._site_from_redirect and self._site_from_redirect != entry.data[CONF_SITE_ID]:
+                return self.async_abort(reason="wrong_site")
+            return self.async_update_reload_and_abort(entry, data_updates={"token": data["token"]})
         self._oauth_data = data
+        if self._site_from_redirect:
+            return await self.async_step_site({CONF_SITE_ID: self._site_from_redirect})
         return await self.async_step_site()
 
     async def async_step_site(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
