@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, cast
 
@@ -28,18 +29,39 @@ _LOGGER = logging.getLogger(__name__)
 AUTHORIZATION_SERVER = AuthorizationServer(authorize_url=OAUTH2_AUTHORIZE, token_url=OAUTH2_TOKEN)
 
 
+def _error_detail(body: str) -> str:
+    """Return ``error: description`` from an RFC 6749 error body."""
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return body[:200]
+    if not isinstance(payload, dict):
+        return body[:200]
+    error = payload.get("error") or payload.get("message") or "error"
+    description = payload.get("error_description")
+    return f"{error}: {description}" if description else str(error)
+
+
 class SolarEdgeOAuth2Implementation(AuthImplementation):
     """SolarEdge expects the token request as a JSON body, not a form."""
 
     async def _token_request(self, data: dict) -> dict:
+        # SolarEdge's token reference takes no redirect_uri (the registered one is
+        # used), and a value that differs from the registered URI gets the code refused.
+        data.pop("redirect_uri", None)
         data["client_id"] = self.client_id
         data["client_secret"] = self.client_secret
         session = async_get_clientsession(self.hass)
+        detail = ""
         try:
             async with session.post(self.token_url, json=data) as resp:
                 if resp.status >= 400:
-                    _LOGGER.debug(
-                        "Token request failed (%s): %s", resp.status, (await resp.text())[:200]
+                    detail = _error_detail(await resp.text())
+                    _LOGGER.warning(
+                        "SolarEdge token request (%s) failed with HTTP %s: %s",
+                        data.get("grant_type"),
+                        resp.status,
+                        detail,
                     )
                 resp.raise_for_status()
                 return cast(dict[str, Any], await resp.json(content_type=None))
@@ -48,7 +70,7 @@ class SolarEdgeOAuth2Implementation(AuthImplementation):
                 "request_info": err.request_info,
                 "history": err.history,
                 "status": err.status,
-                "message": err.message,
+                "message": detail or err.message,
                 "headers": err.headers,
                 "domain": self.domain,
             }

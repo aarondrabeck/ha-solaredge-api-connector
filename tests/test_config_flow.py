@@ -93,7 +93,7 @@ async def test_paste_redirect_creates_entry(
     assert body["grant_type"] == "authorization_code"
     assert body["code"] == "abcd"
     assert body["client_secret"] == "client-secret"
-    assert body["redirect_uri"]
+    assert "redirect_uri" not in body
 
 
 @pytest.mark.usefixtures("current_request_with_host", "setup_credentials")
@@ -111,11 +111,13 @@ async def test_callback_with_state_then_submit(
             "redirect_uri": "https://example.com/auth/external/callback",
         },
     )
+    aioclient_mock.post(OAUTH2_TOKEN, json=TOKEN)
     client = await hass_client_no_auth()
     resp = await client.get(f"/auth/external/callback?code=abcd&state={state}")
     assert resp.status == 200
 
-    aioclient_mock.post(OAUTH2_TOKEN, json=TOKEN)
+    # The code was exchanged as soon as the callback arrived.
+    assert any(str(c[1]) == OAUTH2_TOKEN for c in aioclient_mock.mock_calls)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     # HA's callback drops site_id, so ask for it.
     assert result["type"] is FlowResultType.FORM
@@ -143,10 +145,21 @@ async def test_auth_errors(hass: HomeAssistant, aioclient_mock: AiohttpClientMoc
     )
     assert result["errors"] == {"base": "authorize_rejected"}
 
-    aioclient_mock.post(OAUTH2_TOKEN, status=400, json={"error": "invalid_request"})
+    aioclient_mock.post(
+        OAUTH2_TOKEN,
+        status=400,
+        json={"error": "invalid_request", "error_description": "Invalid code"},
+    )
     result = await hass.config_entries.flow.async_configure(flow_id, {"redirect_url": PASTED})
     assert result["step_id"] == "auth"
     assert result["errors"] == {"base": "oauth_failed"}
+    assert result["description_placeholders"]["error_detail"] == "invalid_request: Invalid code"
+
+    # The same single-use code is never sent twice.
+    calls = aioclient_mock.call_count
+    result = await hass.config_entries.flow.async_configure(flow_id, {"redirect_url": PASTED})
+    assert result["errors"] == {"base": "oauth_failed"}
+    assert aioclient_mock.call_count == calls
 
 
 @pytest.mark.usefixtures("current_request_with_host", "setup_credentials")

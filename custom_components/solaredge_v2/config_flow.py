@@ -69,8 +69,15 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
 
     _oauth_data: dict[str, Any]
     _authorize_url: str | None = None
-    _callback_code: str | None = None
     _site_from_redirect: int | None = None
+    _token: dict[str, Any] | None = None
+    _auth_error: str | None = None
+    _error_detail: str | None = None
+
+    def __init__(self) -> None:
+        """Track codes already exchanged; SolarEdge codes are single-use."""
+        super().__init__()
+        self._codes_tried: set[str] = set()
 
     @property
     def logger(self) -> logging.Logger:
@@ -97,32 +104,27 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
         """
         errors: dict[str, str] = {}
         if user_input is not None and "state" in user_input:
-            # HA's OAuth callback view resumed us; keep the code until Submit.
-            self._callback_code = user_input.get("code")
+            # HA's OAuth callback view resumed us. Exchange right away (codes are
+            # short-lived); the dialog continues when the user selects Submit.
             if "error" in user_input:
-                errors["base"] = "authorize_rejected"
+                self._auth_error = "authorize_rejected"
+            elif code := user_input.get("code"):
+                await self._async_exchange_code(code)
         elif user_input is not None:
             params = parse_redirect(user_input.get(CONF_REDIRECT_URL, ""))
-            code = params.get("code") or self._callback_code
+            site = params.get("site_id", "")
+            if site.isdigit():
+                self._site_from_redirect = int(site)
+            code = params.get("code")
             if "error" in params:
-                errors["base"] = "authorize_rejected"
-            elif not code:
-                errors["base"] = "missing_code"
-            else:
-                site = params.get("site_id", "")
-                self._site_from_redirect = int(site) if site.isdigit() else None
-                try:
-                    return await self._async_exchange_code(code)
-                except (
-                    OAuth2TokenRequestError,
-                    ClientError,
-                    TimeoutError,
-                    KeyError,
-                    ValueError,
-                ) as err:
-                    self.logger.warning("SolarEdge token exchange failed: %s", err)
-                    self._callback_code = None
-                    errors["base"] = "oauth_failed"
+                self._auth_error = "authorize_rejected"
+            elif code and code not in self._codes_tried:
+                await self._async_exchange_code(code)
+            if self._token is not None:
+                return await self.async_oauth_create_entry(
+                    {"auth_implementation": self.flow_impl.domain, "token": self._token}
+                )
+            errors["base"] = self._auth_error or "missing_code"
 
         if self._authorize_url is None:
             try:
@@ -140,21 +142,30 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
                 # The OAuth callback view submits state/code to this step.
                 extra=vol.ALLOW_EXTRA,
             ),
-            description_placeholders={"authorize_url": self._authorize_url},
+            description_placeholders={
+                "authorize_url": self._authorize_url,
+                "error_detail": self._error_detail or "no details",
+            },
             errors=errors,
         )
 
-    async def _async_exchange_code(self, code: str) -> ConfigFlowResult:
-        redirect_uri = getattr(self.flow_impl, "redirect_uri", None)
-        async with asyncio.timeout(30):
-            token = await self.flow_impl.async_resolve_external_data(
-                {"code": code, "state": {"redirect_uri": redirect_uri}}
-            )
-        token["expires_in"] = int(token["expires_in"])
+    async def _async_exchange_code(self, code: str) -> None:
+        """Trade a code for tokens once; remember the outcome."""
+        self._codes_tried.add(code)
+        try:
+            async with asyncio.timeout(30):
+                token = await self.flow_impl.async_resolve_external_data(
+                    {"code": code, "state": {"redirect_uri": None}}
+                )
+            token["expires_in"] = int(token["expires_in"])
+        except (OAuth2TokenRequestError, ClientError, TimeoutError, KeyError, ValueError) as err:
+            self.logger.warning("SolarEdge token exchange failed: %s", err)
+            self._auth_error = "oauth_failed"
+            self._error_detail = getattr(err, "message", None) or str(err) or type(err).__name__
+            return
         token["expires_at"] = time.time() + token["expires_in"]
-        return await self.async_oauth_create_entry(
-            {"auth_implementation": self.flow_impl.domain, "token": token}
-        )
+        self._token = token
+        self._auth_error = None
 
     async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:
         """Store the token; reauth finishes here, setup continues to the site step."""
