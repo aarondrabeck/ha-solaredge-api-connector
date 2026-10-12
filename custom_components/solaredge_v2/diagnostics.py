@@ -43,4 +43,9 @@ async def async_get_config_entry_diagnostics(
         "counter_state": coordinator.counter_state,
         "devices": [async_redact_data(asdict(device), TO_REDACT) for device in coordinator.devices],
         "values": coordinator.values,
+        "battery_values": {
+            f"battery_{i}": v for i, v in enumerate(coordinator.battery_values.values())
+        },
+        "soc_scales": list(coordinator.soc_scales.values()),
+        "raw_storage": {f"battery_{i}": v for i, v in enumerate(coordinator.raw_storage.values())},
     }

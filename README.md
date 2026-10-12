@@ -60,11 +60,11 @@ Requires Home Assistant **2026.10** or newer.
 
 1. Settings → Devices & services → **Add integration** → *SolarEdge V2*.
 2. Enter the Client ID and Client Secret when asked. You can also add them first under *Application credentials*.
-3. Click **Open SolarEdge sign-in** in the dialog. A new tab opens. Sign in with your **homeowner** account and approve access (the grant lasts 24 months).
-4. SolarEdge sends that tab back to Home Assistant, which picks up the authorization automatically. The tab may go blank; just close it.
-5. Back in the dialog, select **Submit**, then enter your site ID.
+3. Select **Open website**. A new tab opens. Sign in with your **homeowner** account and approve access (the grant lasts 24 months).
+4. The tab returns to Home Assistant and closes itself, and the dialog moves on by itself.
+5. Enter your **site ID**. It is shown in the mySolarEdge app and the monitoring portal URL.
 
-> Fallback: if Submit says no authorization was found, paste the full address of the tab SolarEdge sent you back to (it contains `code=`). If SolarEdge refuses the code, the dialog shows its error message.
+> Fallback: if SolarEdge refuses the code, the dialog shows its error and a form. Sign in again with the link there and paste the full address of the tab you are sent back to (it contains `code=` and `site_id=`).
 
 ### 3. Options (Configure)
 
@@ -77,7 +77,7 @@ Requires Home Assistant **2026.10** or newer.
 
 ## Entities
 
-All entities belong to the site device. Inverter, meters and batteries show up as sub-devices with model, firmware and serial number.
+Site-wide entities belong to the site device. Each battery also gets its own device (model, firmware, serial) with **State of charge**, **Power** (+ discharge), **Remaining energy** and **Usable capacity**, from the same telemetry call, so no extra credits. Inverters and meters are not added as devices because they would have no entities; their details are in the diagnostics.
 
 | Entity | Unit | Notes |
 |---|---|---|
@@ -132,7 +132,8 @@ Remove the old `rest:` block, and revoke the Beta keys if you can.
 
 ## Troubleshooting
 
-- **Diagnostics** (device page → Download diagnostics) show the credit ledger, the current poll plan, capability flags and the latest values. Tokens are redacted.
+- **Diagnostics** (device page → Download diagnostics) show the credit ledger, the current poll plan, capability flags, the latest values and the raw battery telemetry units. Tokens are redacted.
+- **Credit counter:** the integration counts its own calls (1 per request) and resets on your billing day. SolarEdge only reports the remaining balance in the developer console, so calls from other apps on the same developer account are not included.
 - **"Credits exhausted" repair:** the developer account hit its monthly limit. Lower the budget or check for other apps on the account.
 - **Reauthentication requested:** the 24-month grant expired or was revoked. Sign in again from the notification.
 

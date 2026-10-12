@@ -92,28 +92,76 @@ def latest_total(telemetry: DeviceTelemetry, metric: str) -> tuple[datetime, flo
     return max(ts for ts, _ in points), sum(value for _, value in points)
 
 
-def battery_state(telemetry: DeviceTelemetry) -> dict[str, float]:
-    """Capacity-weighted state of charge, remaining energy and usable capacity."""
+SOC_FRACTION = "fraction"
+SOC_PERCENT = "percent"
+# Plausible usable capacity of one battery, used to tell 0-1 from 0-100.
+CAPACITY_MIN_WH = 1_000.0
+CAPACITY_MAX_WH = 60_000.0
+
+
+def detect_soc_scale(soe: float, remaining_wh: float | None) -> str | None:
+    """Tell whether ``stateOfEnergy`` is a 0-1 fraction or a 0-100 percentage.
+
+    The docs say percentage, but the API has been seen returning 1.0 for a full
+    battery. The two readings imply usable capacities 100x apart, so at most one
+    is plausible. Returns None when the reading can't decide (e.g. empty battery).
+    """
+    if soe > 1.0:
+        return SOC_PERCENT
+    if soe <= 0 or not remaining_wh or remaining_wh <= 0:
+        return None
+    fraction_ok = CAPACITY_MIN_WH <= remaining_wh / soe <= CAPACITY_MAX_WH
+    percent_ok = CAPACITY_MIN_WH <= remaining_wh / (soe / 100) <= CAPACITY_MAX_WH
+    if fraction_ok != percent_ok:
+        return SOC_FRACTION if fraction_ok else SOC_PERCENT
+    return None
+
+
+def battery_state(
+    telemetry: DeviceTelemetry, scales: dict[str, str]
+) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
+    """Per-battery and combined state of charge, power, remaining energy and capacity.
+
+    ``scales`` holds the detected SoC scale per battery and is updated in place.
+    """
+    per_battery: dict[str, dict[str, float]] = {}
     remaining_total = capacity_total = 0.0
     soc_values: list[float] = []
-    for metrics in telemetry.devices.values():
-        soe = metrics.get("stateOfEnergy")
-        remaining = metrics.get("remainingEnergy")
-        if soe:
-            soc_values.append(soe[-1][1])
-        if remaining:
-            remaining_total += remaining[-1][1]
-            if soe and soe[-1][1] > 0.5:
-                capacity_total += remaining[-1][1] / (soe[-1][1] / 100)
-    result: dict[str, float] = {}
-    if remaining_total or capacity_total:
-        result["battery_remaining_energy"] = remaining_total
+    for serial, metrics in telemetry.devices.items():
+
+        def _last(metric: str, metrics: dict[str, Series] = metrics) -> float | None:
+            series = metrics.get(metric)
+            return series[-1][1] if series else None
+
+        values: dict[str, float] = {}
+        soe, remaining = _last("stateOfEnergy"), _last("remainingEnergy")
+        charge, discharge = _last("chargePower"), _last("dischargePower")
+        if remaining is not None:
+            values["remaining_energy"] = remaining
+            remaining_total += remaining
+        if soe is not None:
+            if serial not in scales and (detected := detect_soc_scale(soe, remaining)):
+                scales[serial] = detected
+            scale = scales.get(serial) or (SOC_FRACTION if soe <= 1.0 else SOC_PERCENT)
+            percent = min(max(soe * 100 if scale == SOC_FRACTION else soe, 0.0), 100.0)
+            values["state_of_charge"] = percent
+            soc_values.append(percent)
+            if remaining is not None and percent > 0.5:
+                values["usable_capacity"] = remaining / (percent / 100)
+                capacity_total += values["usable_capacity"]
+        if charge is not None or discharge is not None:
+            values["power"] = (discharge or 0.0) - (charge or 0.0)
+        per_battery[serial] = values
+
+    totals: dict[str, float] = {}
+    if per_battery and any("remaining_energy" in v for v in per_battery.values()):
+        totals["battery_remaining_energy"] = remaining_total
     if capacity_total:
-        result["battery_usable_capacity"] = capacity_total
-        result["battery_state_of_charge"] = min(remaining_total / capacity_total * 100, 100.0)
+        totals["battery_usable_capacity"] = capacity_total
+        totals["battery_state_of_charge"] = min(remaining_total / capacity_total * 100, 100.0)
     elif soc_values:
-        result["battery_state_of_charge"] = sum(soc_values) / len(soc_values)
-    return result
+        totals["battery_state_of_charge"] = sum(soc_values) / len(soc_values)
+    return totals, per_battery
 
 
 class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
@@ -154,6 +202,10 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             "site_lifetime": False,
         }
         self.values: dict[str, float] = {}
+        self.battery_values: dict[str, dict[str, float]] = {}
+        self.soc_scales: dict[str, str] = {}
+        # Last unit/value per battery metric, for diagnostics.
+        self.raw_storage: dict[str, dict[str, Any]] = {}
         self.data_timestamp: datetime | None = None
         self.last_power: datetime | None = None
         self.last_energy: datetime | None = None
@@ -264,6 +316,8 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
         self.last_energy = _dt(stored.get("last_energy"))
         self.counter_cursor = _dt(stored.get("counter_cursor"))
         self.counter_state = stored.get("counter_state", {})
+        self.battery_values = stored.get("battery_values", {})
+        self.soc_scales = stored.get("soc_scales", {})
 
     def _data_to_save(self) -> dict[str, Any]:
         def _iso(value: datetime | None) -> str | None:
@@ -281,6 +335,8 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             "last_energy": _iso(self.last_energy),
             "counter_cursor": _iso(self.counter_cursor),
             "counter_state": self.counter_state,
+            "battery_values": self.battery_values,
+            "soc_scales": self.soc_scales,
         }
 
     @callback
@@ -325,17 +381,25 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             model="Monitoring site",
             configuration_url=MONITORING_URL,
         )
-        for device in self.devices:
-            registry.async_get_or_create(
-                config_entry_id=self.config_entry.entry_id,
-                identifiers={(DOMAIN, device.serial_number)},
-                name=device.name or f"{device.type.title()} {device.serial_number}",
-                manufacturer=device.manufacturer or "SolarEdge",
-                model=device.model or device.type.title(),
-                sw_version=device.firmware,
-                serial_number=device.serial_number,
-                via_device=site_identifier,
-            )
+        # Battery devices are created by their entities. Anything else (inverters,
+        # meters, retired batteries) has no entities and would sit empty.
+        keep = {site_identifier} | {(DOMAIN, serial) for serial in self.battery_serials}
+        for device in dr.async_entries_for_config_entry(registry, self.config_entry.entry_id):
+            if not device.identifiers & keep:
+                registry.async_update_device(
+                    device.id, remove_config_entry_id=self.config_entry.entry_id
+                )
+
+    @property
+    def battery_serials(self) -> list[str]:
+        """Batteries that report telemetry (or, before the first poll, the inventory)."""
+        if self.battery_values:
+            return list(self.battery_values)
+        return [device.serial_number for device in self.devices if device.type == "BATTERY"]
+
+    def battery_device(self, serial: str) -> Device | None:
+        """Inventory record for a battery serial."""
+        return next((d for d in self.devices if d.serial_number == serial), None)
 
     # --- Planning ------------------------------------------------------------
 
@@ -465,7 +529,19 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
                     if latest := latest_total(storage, metric):
                         values[key] = latest[1]
                         self._set_timestamp(latest[0])
-                values.update(battery_state(storage))
+                totals, per_battery = battery_state(storage, self.soc_scales)
+                values.update(totals)
+                self.battery_values.update(per_battery)
+                self.raw_storage = {
+                    serial: {
+                        metric: {
+                            "unit": storage.units.get(serial, {}).get(metric),
+                            "last": series[-1][1] if series else None,
+                        }
+                        for metric, series in metrics.items()
+                    }
+                    for serial, metrics in storage.devices.items()
+                }
 
         if "grid_import_power" in values or "grid_export_power" in values:
             values["grid_power"] = values.get("grid_import_power", 0.0) - values.get(

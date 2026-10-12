@@ -9,5 +9,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/aarondrabeck/ha-solaredge-v2/issues",
   "requirements": [],
-  "version": "0.1.2"
+  "version": "0.1.3"
 }

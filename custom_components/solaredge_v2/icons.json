@@ -1,15 +1,33 @@
 {
   "entity": {
     "sensor": {
-      "solar_power": { "default": "mdi:solar-power-variant" },
-      "solar_energy": { "default": "mdi:solar-power-variant" },
-      "home_power": { "default": "mdi:home-lightning-bolt" },
-      "home_energy": { "default": "mdi:home-lightning-bolt" },
-      "grid_power": { "default": "mdi:transmission-tower" },
-      "grid_import_power": { "default": "mdi:transmission-tower-import" },
-      "grid_export_power": { "default": "mdi:transmission-tower-export" },
-      "grid_import_energy": { "default": "mdi:transmission-tower-import" },
-      "grid_export_energy": { "default": "mdi:transmission-tower-export" },
+      "solar_power": {
+        "default": "mdi:solar-power-variant"
+      },
+      "solar_energy": {
+        "default": "mdi:solar-power-variant"
+      },
+      "home_power": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "home_energy": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "grid_power": {
+        "default": "mdi:transmission-tower"
+      },
+      "grid_import_power": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "grid_export_power": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "grid_import_energy": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "grid_export_energy": {
+        "default": "mdi:transmission-tower-export"
+      },
       "grid_status": {
         "default": "mdi:transmission-tower",
         "state": {
@@ -18,13 +36,27 @@
           "idle": "mdi:transmission-tower-off"
         }
       },
-      "battery_power": { "default": "mdi:home-battery" },
-      "battery_charge_power": { "default": "mdi:battery-charging" },
-      "battery_discharge_power": { "default": "mdi:battery-minus" },
-      "battery_charge_energy": { "default": "mdi:battery-charging" },
-      "battery_discharge_energy": { "default": "mdi:battery-minus" },
-      "battery_remaining_energy": { "default": "mdi:battery-heart-variant" },
-      "battery_usable_capacity": { "default": "mdi:battery-high" },
+      "battery_power": {
+        "default": "mdi:home-battery"
+      },
+      "battery_charge_power": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_discharge_power": {
+        "default": "mdi:battery-minus"
+      },
+      "battery_charge_energy": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_discharge_energy": {
+        "default": "mdi:battery-minus"
+      },
+      "battery_remaining_energy": {
+        "default": "mdi:battery-heart-variant"
+      },
+      "battery_usable_capacity": {
+        "default": "mdi:battery-high"
+      },
       "battery_status": {
         "default": "mdi:home-battery",
         "state": {
@@ -33,11 +65,30 @@
           "idle": "mdi:battery"
         }
       },
-      "credits_used": { "default": "mdi:counter" },
-      "credits_remaining": { "default": "mdi:wallet" },
-      "credits_projected": { "default": "mdi:chart-timeline-variant" },
-      "data_timestamp": { "default": "mdi:clock-check-outline" },
-      "next_update": { "default": "mdi:clock-outline" }
+      "credits_used": {
+        "default": "mdi:counter"
+      },
+      "credits_remaining": {
+        "default": "mdi:wallet"
+      },
+      "credits_projected": {
+        "default": "mdi:chart-timeline-variant"
+      },
+      "data_timestamp": {
+        "default": "mdi:clock-check-outline"
+      },
+      "next_update": {
+        "default": "mdi:clock-outline"
+      },
+      "pack_power": {
+        "default": "mdi:home-battery"
+      },
+      "pack_remaining_energy": {
+        "default": "mdi:battery-heart-variant"
+      },
+      "pack_usable_capacity": {
+        "default": "mdi:battery-high"
+      }
     }
   }
 }

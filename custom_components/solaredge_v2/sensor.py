@@ -187,6 +187,50 @@ SENSORS: tuple[SolarEdgeSensorDescription, ...] = (
 )
 
 
+@dataclass(frozen=True, kw_only=True)
+class SolarEdgeBatterySensorDescription(SensorEntityDescription):
+    """Describes a per-battery sensor (key into ``coordinator.battery_values``)."""
+
+
+BATTERY_SENSORS: tuple[SolarEdgeBatterySensorDescription, ...] = (
+    SolarEdgeBatterySensorDescription(
+        key="state_of_charge",
+        translation_key="pack_state_of_charge",
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=0,
+    ),
+    SolarEdgeBatterySensorDescription(
+        key="power",
+        translation_key="pack_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        suggested_unit_of_measurement=UnitOfPower.KILO_WATT,
+        suggested_display_precision=2,
+    ),
+    SolarEdgeBatterySensorDescription(
+        key="remaining_energy",
+        translation_key="pack_remaining_energy",
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        suggested_display_precision=2,
+    ),
+    SolarEdgeBatterySensorDescription(
+        key="usable_capacity",
+        translation_key="pack_usable_capacity",
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        suggested_display_precision=2,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: SolarEdgeConfigEntry,
@@ -194,11 +238,18 @@ async def async_setup_entry(
 ) -> None:
     """Set up SolarEdge sensors."""
     coordinator = entry.runtime_data
-    async_add_entities(
+    entities: list[SensorEntity] = [
         SolarEdgeSensor(coordinator, description)
         for description in SENSORS
         if description.exists_fn(coordinator)
-    )
+    ]
+    if coordinator.has_battery:
+        entities.extend(
+            SolarEdgeBatterySensor(coordinator, serial, description)
+            for serial in coordinator.battery_serials
+            for description in BATTERY_SENSORS
+        )
+    async_add_entities(entities)
 
 
 class SolarEdgeSensor(CoordinatorEntity[SolarEdgeCoordinator], SensorEntity):
@@ -220,3 +271,39 @@ class SolarEdgeSensor(CoordinatorEntity[SolarEdgeCoordinator], SensorEntity):
     def native_value(self) -> StateType:
         """Return the sensor value."""
         return self.entity_description.value_fn(self.coordinator)
+
+
+class SolarEdgeBatterySensor(CoordinatorEntity[SolarEdgeCoordinator], SensorEntity):
+    """A sensor for one battery, on its own device."""
+
+    _attr_has_entity_name = True
+    entity_description: SolarEdgeBatterySensorDescription
+
+    def __init__(
+        self,
+        coordinator: SolarEdgeCoordinator,
+        serial: str,
+        description: SolarEdgeBatterySensorDescription,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._serial = serial
+        self._attr_unique_id = f"{coordinator.site_id}_{serial}_{description.key}"
+        device = coordinator.battery_device(serial)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, serial)},
+            name=(device.name if device and device.name else f"Battery {serial}"),
+            manufacturer=(device.manufacturer if device and device.manufacturer else "SolarEdge"),
+            model=(device.model if device and device.model else "Battery"),
+            sw_version=device.firmware if device else None,
+            serial_number=serial,
+            via_device=(DOMAIN, str(coordinator.site_id)),
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the sensor value."""
+        return self.coordinator.battery_values.get(self._serial, {}).get(
+            self.entity_description.key
+        )

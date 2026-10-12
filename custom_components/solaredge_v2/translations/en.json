@@ -7,9 +7,9 @@
       "pick_implementation": {
         "title": "Pick authentication method"
       },
-      "auth": {
-        "title": "Sign in to SolarEdge",
-        "description": "1. **[Open SolarEdge sign-in]({authorize_url})** (opens a new tab). Sign in with your mySolarEdge homeowner account and approve access.\n2. You are sent back to Home Assistant, which picks up the authorization automatically. You can close that tab.\n3. Come back here and select **Submit**.\n\nOnly if Submit says no authorization was found: paste the full address of the tab SolarEdge sent you back to, then select Submit.",
+      "paste": {
+        "title": "Finish signing in",
+        "description": "Sign-in did not complete automatically.\n\n1. **[Open SolarEdge sign-in]({authorize_url})** again and approve access.\n2. Paste the full address of the tab SolarEdge sends you back to (it contains code= and site_id=). If that tab closes by itself, leave the field empty.\n3. Select **Submit**.",
         "data": {
           "redirect_url": "Address you were sent back to"
         },
@@ -160,6 +160,18 @@
       },
       "next_update": {
         "name": "Next API update"
+      },
+      "pack_state_of_charge": {
+        "name": "State of charge"
+      },
+      "pack_power": {
+        "name": "Power"
+      },
+      "pack_remaining_energy": {
+        "name": "Remaining energy"
+      },
+      "pack_usable_capacity": {
+        "name": "Usable capacity"
       }
     }
   },

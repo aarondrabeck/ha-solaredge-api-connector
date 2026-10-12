@@ -8,7 +8,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.recorder.statistics import get_last_statistics
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import device_registry as dr, issue_registry as ir
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 from pytest_homeassistant_custom_component.components.recorder.common import (
@@ -54,8 +54,13 @@ async def test_setup_and_sensors(
     # Charging: positive = discharge.
     assert float(_state(hass, "sensor.home_battery_power")) == pytest.approx(-2.0)
     assert _state(hass, "sensor.home_battery_status") == "charging"
-    assert float(_state(hass, "sensor.home_battery_state_of_charge")) == pytest.approx(50)
-    assert float(_state(hass, "sensor.home_battery_usable_capacity")) == pytest.approx(9.7)
+    # The API reports state of energy as a 0-1 fraction (1.0 = full).
+    assert float(_state(hass, "sensor.home_battery_state_of_charge")) == pytest.approx(100)
+    assert float(_state(hass, "sensor.home_battery_usable_capacity")) == pytest.approx(4.85)
+    # Per-battery entities live on the battery's own device.
+    assert float(_state(hass, "sensor.battery_1_state_of_charge")) == pytest.approx(100)
+    assert float(_state(hass, "sensor.battery_1_power")) == pytest.approx(-2.0)
+    assert float(_state(hass, "sensor.battery_1_remaining_energy")) == pytest.approx(4.85)
     assert float(_state(hass, "sensor.home_grid_import_energy")) == pytest.approx(4489.617)
     assert float(_state(hass, "sensor.home_solar_energy")) == pytest.approx(6203.3)
     assert float(_state(hass, "sensor.home_battery_charge_energy")) == pytest.approx(3000000)
@@ -135,3 +140,30 @@ async def test_restart_reuses_cached_state(
     assert config_entry.state is ConfigEntryState.LOADED
     assert mock_api.call_count == calls
     assert float(_state(hass, "sensor.home_solar_power")) == pytest.approx(5.2)
+
+
+@pytest.mark.freeze_time(NOW)
+@pytest.mark.usefixtures("setup_credentials")
+async def test_only_site_and_battery_devices(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    mock_api: AiohttpClientMocker,
+) -> None:
+    """Inverters and meters don't become empty devices; stale ones are removed."""
+    registry = dr.async_get(hass)
+    registry.async_get_or_create(
+        config_entry_id=config_entry.entry_id, identifiers={(DOMAIN, "7E1234AB-CD")}
+    )
+    await _setup(hass, config_entry)
+    identifiers = {
+        next(iter(device.identifiers))[1]
+        for device in dr.async_entries_for_config_entry(registry, config_entry.entry_id)
+    }
+    assert identifiers == {"3581845", "BATT-001"}
+    battery = next(
+        d
+        for d in dr.async_entries_for_config_entry(registry, config_entry.entry_id)
+        if (DOMAIN, "BATT-001") in d.identifiers
+    )
+    assert battery.model == "Home Battery 10kWh"
+    assert battery.via_device_id is not None

@@ -95,20 +95,32 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
         """Return the options flow."""
         return SolarEdgeOptionsFlow()
 
-    async def async_step_auth(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Sign in at SolarEdge, then finish from the callback or a pasted redirect URL.
+    async def async_step_creation(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Exchange the code HA's callback delivered; fall back to pasting on failure."""
+        await self._async_exchange_code(self.external_data["code"])
+        if self._token is not None:
+            return await self.async_oauth_create_entry(
+                {"auth_implementation": self.flow_impl.domain, "token": self._token}
+            )
+        return await self.async_step_paste()
 
-        HA's callback needs ``state`` echoed back and drops ``site_id``; SolarEdge's
-        redirect may omit the former. A form with the sign-in link and an optional
-        "paste the address you landed on" field works in every case.
+    async def async_step_paste(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Fallback: sign in again and paste the address SolarEdge sent the tab to.
+
+        The normal path is HA's external step, which closes the sign-in tab and
+        continues by itself. This form covers a refused or lost callback.
         """
         errors: dict[str, str] = {}
+        if self._auth_error:
+            errors["base"] = self._auth_error
         if user_input is not None and "state" in user_input:
-            # HA's OAuth callback view resumed us. Exchange right away (codes are
-            # short-lived); the dialog continues when the user selects Submit.
+            # Signing in again from this form: HA's callback lands here. Exchange now;
+            # Submit then continues with the token.
             if "error" in user_input:
                 self._auth_error = "authorize_rejected"
-            elif code := user_input.get("code"):
+            elif (code := user_input.get("code")) and code not in self._codes_tried:
                 await self._async_exchange_code(code)
         elif user_input is not None:
             params = parse_redirect(user_input.get(CONF_REDIRECT_URL, ""))
@@ -125,6 +137,8 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
                     {"auth_implementation": self.flow_impl.domain, "token": self._token}
                 )
             errors["base"] = self._auth_error or "missing_code"
+        elif self._token is not None:
+            errors = {}
 
         if self._authorize_url is None:
             try:
@@ -136,10 +150,10 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
                 return self.async_abort(reason="no_url_available")
 
         return self.async_show_form(
-            step_id="auth",
+            step_id="paste",
             data_schema=vol.Schema(
                 {vol.Optional(CONF_REDIRECT_URL): selector.TextSelector()},
-                # The OAuth callback view submits state/code to this step.
+                # HA's OAuth callback view submits state/code to this step.
                 extra=vol.ALLOW_EXTRA,
             ),
             description_placeholders={
@@ -205,17 +219,18 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
                     title=site.name, data={**self._oauth_data, CONF_SITE_ID: site_id}
                 )
 
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SITE_ID): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
+                )
+            }
+        )
         return self.async_show_form(
             step_id="site",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_SITE_ID): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=1, step=1, mode=selector.NumberSelectorMode.BOX
-                        )
-                    )
-                }
-            ),
+            data_schema=schema,
             errors=errors,
         )
 

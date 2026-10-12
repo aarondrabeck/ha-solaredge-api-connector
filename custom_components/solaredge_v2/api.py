@@ -116,6 +116,7 @@ class DeviceTelemetry:
     """Bulk telemetry: ``{serial: {metric: series}}`` with values in W/Wh/%."""
 
     devices: dict[str, dict[str, Series]] = field(default_factory=dict)
+    units: dict[str, dict[str, str | None]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -287,15 +288,18 @@ class SolarEdgeClient:
         telemetry = DeviceTelemetry()
         for serial, metrics in (raw or {}).items():
             parsed: dict[str, Series] = {}
+            units: dict[str, str | None] = {}
             for metric, payload in (metrics or {}).items():
                 if not isinstance(payload, dict):
                     continue
                 unit = payload.get("unit")
+                units[metric] = unit
                 series = parse_series(payload.get("values"))
                 if unit and unit.upper() != "PERCENTAGE":
                     series = [(ts, scale_to_base(v, unit)) for ts, v in series]
                 parsed[metric] = series
             telemetry.devices[serial] = parsed
+            telemetry.units[serial] = units
         return telemetry
 
     # --- Lifetime counters -----------------------------------------------------

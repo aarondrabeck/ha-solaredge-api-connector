@@ -6,12 +6,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.config_entry_oauth2_flow import (
     ImplementationUnavailableError,
     OAuth2Session,
     async_get_config_entry_implementation,
 )
 
+from .const import CONF_SITE_ID, DOMAIN
 from .coordinator import SolarEdgeCoordinator
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -36,6 +38,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: SolarEdgeConfigEntry) ->
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: SolarEdgeConfigEntry, device: dr.DeviceEntry
+) -> bool:
+    """Allow deleting any device except the site itself."""
+    return (DOMAIN, str(entry.data[CONF_SITE_ID])) not in device.identifiers
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SolarEdgeConfigEntry) -> bool:
