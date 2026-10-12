@@ -1,0 +1,14 @@
+{
+  "period": {"from": "2026-10-12T09:00:00-05:00", "to": "2026-10-12T12:00:00-05:00"},
+  "resolution": "QUARTER_HOUR",
+  "meters": {
+    "2644513869": {
+      "importPower": {"unit": "W", "values": [{"timestamp": "2026-10-12T11:30:00-05:00", "value": 0}, {"timestamp": "2026-10-12T11:45:00-05:00", "value": null}]},
+      "exportPower": {"unit": "W", "values": [{"timestamp": "2026-10-12T11:30:00-05:00", "value": 1200.5}]},
+      "consumptionPower": {"unit": "KW", "values": [{"timestamp": "2026-10-12T11:30:00-05:00", "value": 1.8}]}
+    },
+    "617887617": {
+      "productionPower": {"unit": "W", "values": [{"timestamp": "2026-10-12T11:15:00-05:00", "value": 5000}, {"timestamp": "2026-10-12T11:30:00-05:00", "value": 5200}]}
+    }
+  }
+}

@@ -1,0 +1,5 @@
+[
+  {"type": "INVERTER", "serialNumber": "7E1234AB-CD", "manufacturer": "SolarEdge", "model": "SE7600H-US", "firmware": "4.25.15.1.100.2059.2.100.1751", "parent": null, "name": "Inverter 1", "active": true},
+  {"type": "METER", "serialNumber": "2644513869", "manufacturer": "SolarEdge", "model": "Energy Meter", "firmware": null, "parent": {"serialNumber": "7E1234AB-CD", "type": "INVERTER", "name": "Inverter 1"}, "name": "Grid meter", "meterType": "FeedIn", "active": true},
+  {"type": "BATTERY", "serialNumber": "BATT-001", "manufacturer": "SolarEdge", "model": "Home Battery 10kWh", "firmware": null, "parent": {"serialNumber": "7E1234AB-CD", "type": "INVERTER", "name": "Inverter 1"}, "name": "Battery 1", "active": true}
+]

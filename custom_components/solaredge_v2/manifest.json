@@ -1,0 +1,13 @@
+{
+  "domain": "solaredge_v2",
+  "name": "SolarEdge V2",
+  "codeowners": ["@aarondrabeck"],
+  "config_flow": true,
+  "dependencies": ["application_credentials", "recorder"],
+  "documentation": "https://github.com/aarondrabeck/ha-solaredge-v2",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/aarondrabeck/ha-solaredge-v2/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

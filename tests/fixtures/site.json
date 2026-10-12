@@ -1,0 +1,8 @@
+{
+  "siteId": 3581845,
+  "name": "Home",
+  "peakPower": 9.6,
+  "installationDate": "2023-05-10",
+  "location": {"city": "Somewhere", "country": "United States", "timezone": "America/Chicago"},
+  "activationStatus": "ACTIVE"
+}

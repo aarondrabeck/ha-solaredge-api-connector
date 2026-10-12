@@ -1,0 +1,12 @@
+{
+  "period": {"from": "2026-10-12T09:00:00-05:00", "to": "2026-10-12T12:00:00-05:00"},
+  "resolution": "QUARTER_HOUR",
+  "storage": {
+    "BATT-001": {
+      "chargePower": {"unit": "W", "values": [{"timestamp": "2026-10-12T11:30:00-05:00", "value": 2000}]},
+      "dischargePower": {"unit": "W", "values": [{"timestamp": "2026-10-12T11:30:00-05:00", "value": 0}]},
+      "stateOfEnergy": {"unit": "PERCENTAGE", "values": [{"timestamp": "2026-10-12T11:30:00-05:00", "value": 50}]},
+      "remainingEnergy": {"unit": "WH", "values": [{"timestamp": "2026-10-12T11:30:00-05:00", "value": 4850}]}
+    }
+  }
+}

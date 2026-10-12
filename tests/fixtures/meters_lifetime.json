@@ -1,0 +1,10 @@
+{
+  "meters": [
+    {"serialNumber": "2644513869", "productionEnergy": [], "consumptionEnergy": [],
+     "importEnergy": [{"timestamp": "2026-10-12T15:03:28Z", "value": 4489559}, {"timestamp": "2026-10-12T15:48:28Z", "value": 4489600}, {"timestamp": "2026-10-12T16:03:28Z", "value": 4489617}],
+     "exportEnergy": [{"timestamp": "2026-10-12T15:03:28Z", "value": 3932472}, {"timestamp": "2026-10-12T15:48:28Z", "value": 3933000}, {"timestamp": "2026-10-12T16:03:28Z", "value": 3933400}],
+     "unit": "WH"},
+    {"serialNumber": "617887617", "productionEnergy": [{"timestamp": "2026-10-12T15:03:28Z", "value": 6198740}, {"timestamp": "2026-10-12T15:48:28Z", "value": 6202000}, {"timestamp": "2026-10-12T16:03:28Z", "value": 6203300}],
+     "consumptionEnergy": [], "importEnergy": [], "exportEnergy": [], "unit": "WH"}
+  ]
+}

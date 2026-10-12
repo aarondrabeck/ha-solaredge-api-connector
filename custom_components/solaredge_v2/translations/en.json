@@ -1,0 +1,111 @@
+{
+  "application_credentials": {
+    "description": "Create a **Site Access** application at [{developer_url}]({developer_url}) with scopes `SITE_DATA` and `DEVICE_DATA` and Redirect URI `{redirect_url}`, then enter its Client ID and Client Secret here."
+  },
+  "config": {
+    "step": {
+      "pick_implementation": {
+        "title": "Pick authentication method"
+      },
+      "site": {
+        "title": "SolarEdge site",
+        "description": "Enter the site ID you just granted access to. It is shown in the mySolarEdge app and in the monitoring portal URL.",
+        "data": {
+          "site_id": "Site ID"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate integration",
+        "description": "The SolarEdge authorization has expired or was revoked. Sign in again to continue."
+      }
+    },
+    "error": {
+      "invalid_site": "This site was not found or the authorization does not cover it.",
+      "invalid_auth": "Invalid authentication",
+      "cannot_connect": "Failed to connect"
+    },
+    "abort": {
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Re-authentication was successful",
+      "missing_configuration": "The integration is not configured. Add application credentials first.",
+      "authorize_url_timeout": "Timeout generating authorize URL.",
+      "no_url_available": "No URL available. For information about this error, check the help section.",
+      "oauth_error": "Received invalid token data.",
+      "oauth_timeout": "Timeout resolving OAuth token.",
+      "oauth_unauthorized": "OAuth authorization error while obtaining access token.",
+      "oauth_failed": "Error while obtaining access token.",
+      "user_rejected_authorize": "Account linking rejected."
+    },
+    "create_entry": {
+      "default": "Successfully authenticated"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "API credit budget",
+        "description": "Every SolarEdge API call costs one credit. Polling intervals are calculated so this budget lasts the whole billing cycle.",
+        "data": {
+          "monthly_budget": "Credits per billing cycle",
+          "billing_day": "Billing cycle start day",
+          "day_share": "Share of power polls during daylight",
+          "energy_interval_hours": "Energy counter interval"
+        },
+        "data_description": {
+          "monthly_budget": "Free tier is 2,000/month. Keep some margin for restarts and other apps on the same developer account.",
+          "billing_day": "Day of month your credits reset (the anniversary of your plan start, shown under Usage in the developer console).",
+          "day_share": "Percentage of power refreshes spent between sunrise and sunset.",
+          "energy_interval_hours": "Hours between lifetime counter fetches. Statistics are backfilled per hour, so a longer interval only delays them."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "solar_power": { "name": "Solar power" },
+      "home_power": { "name": "Home power" },
+      "grid_power": { "name": "Grid power" },
+      "grid_import_power": { "name": "Grid import power" },
+      "grid_export_power": { "name": "Grid export power" },
+      "battery_power": { "name": "Battery power" },
+      "battery_charge_power": { "name": "Battery charge power" },
+      "battery_discharge_power": { "name": "Battery discharge power" },
+      "battery_state_of_charge": { "name": "Battery state of charge" },
+      "battery_remaining_energy": { "name": "Battery remaining energy" },
+      "battery_usable_capacity": { "name": "Battery usable capacity" },
+      "grid_status": {
+        "name": "Grid status",
+        "state": {
+          "importing": "Importing",
+          "exporting": "Exporting",
+          "idle": "Idle"
+        }
+      },
+      "battery_status": {
+        "name": "Battery status",
+        "state": {
+          "charging": "Charging",
+          "discharging": "Discharging",
+          "idle": "Idle"
+        }
+      },
+      "solar_energy": { "name": "Solar energy" },
+      "home_energy": { "name": "Home energy" },
+      "grid_import_energy": { "name": "Grid import energy" },
+      "grid_export_energy": { "name": "Grid export energy" },
+      "battery_charge_energy": { "name": "Battery charge energy" },
+      "battery_discharge_energy": { "name": "Battery discharge energy" },
+      "credits_used": { "name": "API credits used", "unit_of_measurement": "credits" },
+      "credits_remaining": { "name": "API credits remaining", "unit_of_measurement": "credits" },
+      "credits_projected": { "name": "API credits projected", "unit_of_measurement": "credits" },
+      "data_timestamp": { "name": "Data timestamp" },
+      "next_update": { "name": "Next API update" }
+    }
+  },
+  "issues": {
+    "credits_exhausted": {
+      "title": "SolarEdge API credits exhausted",
+      "description": "The SolarEdge developer account behind {site} has used all of its monthly API credits. Polling is paused and resumes after the billing cycle resets on {reset}. Lower the credit budget in the integration options, or check for other apps using the same developer account."
+    }
+  }
+}
