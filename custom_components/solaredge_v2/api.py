@@ -109,6 +109,8 @@ class Device:
     firmware: str | None = None
     parent_serial: str | None = None
     meter_type: str | None = None
+    # False when the inventory lists the device but it isn't reporting.
+    active: bool | None = None
 
 
 @dataclass(slots=True)
@@ -232,6 +234,7 @@ class SolarEdgeClient:
                     firmware=item.get("firmware") or item.get("firmwareVersion"),
                     parent_serial=parent.get("serialNumber") or item.get("connectedTo"),
                     meter_type=item.get("meterType"),
+                    active=item.get("active"),
                 )
             )
         return devices

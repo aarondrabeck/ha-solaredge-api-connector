@@ -167,3 +167,45 @@ async def test_only_site_and_battery_devices(
     )
     assert battery.model == "Home Battery 10kWh"
     assert battery.via_device_id is not None
+
+
+@pytest.mark.freeze_time(NOW)
+@pytest.mark.usefixtures("setup_credentials")
+async def test_inactive_meters_are_not_polled(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Meters the inventory marks inactive cost no credits; site endpoints are used."""
+    from .conftest import load_json
+
+    devices = [d for d in load_json("devices.json") if d["type"] != "BATTERY"]
+    for device in devices:
+        if device["type"] == "METER":
+            device["active"] = False
+    aioclient_mock.get(SITE_URL, json=load_json("site.json"))
+    aioclient_mock.get(f"{SITE_URL}/devices", json=devices)
+    aioclient_mock.get(
+        f"{SITE_URL}/power",
+        json={"values": [{"timestamp": "2026-10-12T16:45:00Z", "value": 4100.0}]},
+    )
+    aioclient_mock.get(
+        f"{SITE_URL}/lifetime-energy",
+        json={"energy": 6203300.0, "unit": "WH", "lastUpdateTime": "2026-10-12T16:45:00Z"},
+    )
+    await _setup(hass, config_entry)
+    assert config_entry.state is ConfigEntryState.LOADED
+
+    assert not any("/meters/" in str(call[1]) for call in aioclient_mock.mock_calls)
+    assert float(_state(hass, "sensor.home_solar_power")) == pytest.approx(4.1)
+    # site + devices + site power + site lifetime energy
+    assert _state(hass, "sensor.home_api_credits_used") == "4"
+    coordinator = config_entry.runtime_data
+    assert coordinator.capabilities["meters"] is False
+    assert coordinator.power_calls == 1
+    assert coordinator.energy_calls == 1
+
+    # A meter that starts reporting is probed again after the next inventory refresh.
+    next(d for d in coordinator.devices if d.type == "METER").active = True
+    coordinator._update_meter_capability()
+    assert coordinator.capabilities["meters"] is None

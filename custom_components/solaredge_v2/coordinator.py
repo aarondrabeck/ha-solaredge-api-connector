@@ -366,8 +366,23 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             self.devices = await self.client.get_devices(self.site_id)
         except SolarEdgeForbiddenError:
             _LOGGER.warning("No DEVICE_DATA access; device inventory unavailable")
+        else:
+            self._update_meter_capability()
         self.inventory_updated = now
         self._schedule_save()
+
+    def _update_meter_capability(self) -> None:
+        """Skip the meter calls while the inventory has no active meter.
+
+        Sites can list meters that never report (``active: false``); their telemetry
+        and counters come back empty but each call still costs a credit. Re-checked
+        with every inventory refresh, so a meter that starts reporting is picked up.
+        """
+        if any(d.type == "METER" and d.active is not False for d in self.devices):
+            if self.capabilities["meters"] is False:
+                self.capabilities["meters"] = None
+        else:
+            self.capabilities["meters"] = False
 
     @callback
     def _register_devices(self) -> None:
