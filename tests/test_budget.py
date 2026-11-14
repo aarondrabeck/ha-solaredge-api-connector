@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -134,3 +135,36 @@ def test_is_due() -> None:
     assert not is_due(None, None, now)
     assert not is_due(now - timedelta(minutes=20), timedelta(minutes=30), now)
     assert is_due(now - timedelta(minutes=29, seconds=30), timedelta(minutes=30), now)
+
+
+def test_status_credits_come_out_of_the_power_budget() -> None:
+    """Status polling is budgeted, and slows power polling rather than overspending."""
+    now = datetime(2026, 10, 1, 12, tzinfo=TZ)
+    config = replace(CONFIG, status_interval=timedelta(hours=12))
+    kwargs = {"power_calls": 2, "energy_calls": 2, "is_day": True, "day_hours": 12.0}
+
+    without = plan(now, config, CreditLedger(), **kwargs)
+    with_status = plan(now, config, CreditLedger(), status_calls=2, **kwargs)
+
+    assert without.status_interval is None
+    assert with_status.status_interval == timedelta(hours=12)
+    assert with_status.power_interval_day > without.power_interval_day
+    assert with_status.projected_total <= config.monthly_budget
+
+
+def test_status_polling_can_be_turned_off() -> None:
+    """With no interval, status calls are neither planned nor reserved."""
+    now = datetime(2026, 10, 1, 12, tzinfo=TZ)
+    kwargs = {"power_calls": 2, "energy_calls": 2, "is_day": True, "day_hours": 12.0}
+    off = plan(now, CONFIG, CreditLedger(), status_calls=2, **kwargs)
+    assert off.status_interval is None
+    assert off.power_interval_day == plan(now, CONFIG, CreditLedger(), **kwargs).power_interval_day
+
+
+def test_status_polling_pauses_when_credits_run_out() -> None:
+    """Exhausted credits stop status polling with everything else."""
+    now = datetime(2026, 10, 1, 12, tzinfo=TZ)
+    config = replace(CONFIG, status_interval=timedelta(hours=12))
+    ledger = CreditLedger(exhausted=True)
+    kwargs = {"power_calls": 2, "energy_calls": 2, "is_day": True, "day_hours": 12.0}
+    assert plan(now, config, ledger, status_calls=2, **kwargs).status_interval is None

@@ -1,0 +1,20 @@
+{
+  "period": {
+    "from": "2000-01-01T00:00:00+00:00",
+    "to": "2026-10-12T12:00:00-05:00"
+  },
+  "resolution": "TOTAL",
+  "evChargers": {
+    "99123456-A5": {
+      "chargingEnergy": {
+        "unit": "KWH",
+        "values": [
+          {
+            "timestamp": "2000-01-01T00:00:00+00:00",
+            "value": 1234.5
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "period": {
+    "from": "2026-10-12T00:00:00-05:00",
+    "to": "2026-10-12T12:00:00-05:00"
+  },
+  "resolution": "QUARTER_HOUR",
+  "inverters": {
+    "7E1234AB-CD": {
+      "powerLimit": {
+        "unit": "PERCENTAGE",
+        "values": [
+          {
+            "timestamp": "2026-10-12T11:30:00-05:00",
+            "value": 100
+          }
+        ]
+      },
+      "operationMode": {
+        "values": [
+          {
+            "timestamp": "2026-10-12T11:30:00-05:00",
+            "value": 0
+          }
+        ]
+      },
+      "inverterMode": {
+        "values": [
+          {
+            "timestamp": "2026-10-12T11:15:00-05:00",
+            "value": "STARTING"
+          },
+          {
+            "timestamp": "2026-10-12T11:30:00-05:00",
+            "value": "MPPT"
+          },
+          {
+            "timestamp": "2026-10-12T11:45:00-05:00",
+            "value": null
+          }
+        ]
+      },
+      "temperature": {
+        "unit": "CELSIUS",
+        "values": [
+          {
+            "timestamp": "2026-10-12T11:30:00-05:00",
+            "value": 37.5
+          }
+        ]
+      }
+    }
+  }
+}

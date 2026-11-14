@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -12,8 +13,17 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfEnergy, UnitOfPower
-from homeassistant.core import HomeAssistant
+from homeassistant.const import (
+    DEGREE,
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfEnergy,
+    UnitOfIrradiance,
+    UnitOfPower,
+    UnitOfSpeed,
+    UnitOfTemperature,
+)
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -188,12 +198,14 @@ SENSORS: tuple[SolarEdgeSensorDescription, ...] = (
 
 
 @dataclass(frozen=True, kw_only=True)
-class SolarEdgeBatterySensorDescription(SensorEntityDescription):
-    """Describes a per-battery sensor (key into ``coordinator.battery_values``)."""
+class SolarEdgeDeviceSensorDescription(SensorEntityDescription):
+    """Describes a sensor of one device; ``key`` indexes that device's ``source`` values."""
+
+    source: Callable[[SolarEdgeCoordinator], dict[str, dict[str, Any]]] = lambda c: c.battery_values
 
 
-BATTERY_SENSORS: tuple[SolarEdgeBatterySensorDescription, ...] = (
-    SolarEdgeBatterySensorDescription(
+BATTERY_SENSORS: tuple[SolarEdgeDeviceSensorDescription, ...] = (
+    SolarEdgeDeviceSensorDescription(
         key="state_of_charge",
         translation_key="pack_state_of_charge",
         device_class=SensorDeviceClass.BATTERY,
@@ -201,7 +213,7 @@ BATTERY_SENSORS: tuple[SolarEdgeBatterySensorDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=0,
     ),
-    SolarEdgeBatterySensorDescription(
+    SolarEdgeDeviceSensorDescription(
         key="power",
         translation_key="pack_power",
         device_class=SensorDeviceClass.POWER,
@@ -210,7 +222,7 @@ BATTERY_SENSORS: tuple[SolarEdgeBatterySensorDescription, ...] = (
         suggested_unit_of_measurement=UnitOfPower.KILO_WATT,
         suggested_display_precision=2,
     ),
-    SolarEdgeBatterySensorDescription(
+    SolarEdgeDeviceSensorDescription(
         key="remaining_energy",
         translation_key="pack_remaining_energy",
         device_class=SensorDeviceClass.ENERGY_STORAGE,
@@ -219,7 +231,7 @@ BATTERY_SENSORS: tuple[SolarEdgeBatterySensorDescription, ...] = (
         suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=2,
     ),
-    SolarEdgeBatterySensorDescription(
+    SolarEdgeDeviceSensorDescription(
         key="usable_capacity",
         translation_key="pack_usable_capacity",
         device_class=SensorDeviceClass.ENERGY_STORAGE,
@@ -228,7 +240,155 @@ BATTERY_SENSORS: tuple[SolarEdgeBatterySensorDescription, ...] = (
         suggested_display_precision=2,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    SolarEdgeDeviceSensorDescription(
+        key="internal_temperature",
+        translation_key="pack_internal_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        source=lambda c: c.battery_status,
+    ),
+    # SolarEdge publishes no meaning for this code, so it starts disabled.
+    SolarEdgeDeviceSensorDescription(
+        key="state_code",
+        translation_key="pack_state_code",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        source=lambda c: c.battery_status,
+    ),
 )
+
+INVERTER_SENSORS: tuple[SolarEdgeDeviceSensorDescription, ...] = (
+    SolarEdgeDeviceSensorDescription(
+        key="mode",
+        translation_key="inverter_mode",
+        source=lambda c: c.inverter_status,
+    ),
+    SolarEdgeDeviceSensorDescription(
+        key="temperature",
+        translation_key="inverter_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        source=lambda c: c.inverter_status,
+    ),
+    SolarEdgeDeviceSensorDescription(
+        key="power_limit",
+        translation_key="inverter_power_limit",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        source=lambda c: c.inverter_status,
+    ),
+    # A raw device code; the decoded state is the mode sensor.
+    SolarEdgeDeviceSensorDescription(
+        key="operation_mode",
+        translation_key="inverter_operation_mode",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        source=lambda c: c.inverter_status,
+    ),
+)
+
+EV_CHARGER_SENSORS: tuple[SolarEdgeDeviceSensorDescription, ...] = (
+    SolarEdgeDeviceSensorDescription(
+        key="power",
+        translation_key="charger_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        suggested_unit_of_measurement=UnitOfPower.KILO_WATT,
+        suggested_display_precision=2,
+        source=lambda c: c.ev_values,
+    ),
+    SolarEdgeDeviceSensorDescription(
+        key="energy",
+        translation_key="charger_energy",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        suggested_display_precision=1,
+        source=lambda c: c.ev_values,
+    ),
+)
+
+
+def _environment(
+    measurement: str,
+    device_class: SensorDeviceClass,
+    unit: str,
+    state_class: SensorStateClass = SensorStateClass.MEASUREMENT,
+) -> SensorEntityDescription:
+    return SensorEntityDescription(
+        key=measurement.lower(),
+        translation_key=measurement.lower(),
+        device_class=device_class,
+        state_class=state_class,
+        native_unit_of_measurement=unit,
+    )
+
+
+# Keyed by the inventory's ``measurement``; each sensor reports exactly one.
+ENVIRONMENT_SENSORS: dict[str, SensorEntityDescription] = {
+    measurement: _environment(measurement, device_class, unit, *state_class)
+    for measurement, device_class, unit, *state_class in (
+        (
+            "PLANE_OF_ARRAY",
+            SensorDeviceClass.IRRADIANCE,
+            UnitOfIrradiance.WATTS_PER_SQUARE_METER,
+        ),
+        (
+            "GLOBAL_HORIZONTAL",
+            SensorDeviceClass.IRRADIANCE,
+            UnitOfIrradiance.WATTS_PER_SQUARE_METER,
+        ),
+        ("DIRECT", SensorDeviceClass.IRRADIANCE, UnitOfIrradiance.WATTS_PER_SQUARE_METER),
+        ("DIFFUSED", SensorDeviceClass.IRRADIANCE, UnitOfIrradiance.WATTS_PER_SQUARE_METER),
+        ("MODULE", SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS),
+        ("AMBIENT", SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS),
+        ("WIND_SPEED", SensorDeviceClass.WIND_SPEED, UnitOfSpeed.METERS_PER_SECOND),
+        (
+            "WIND_DIRECTION",
+            SensorDeviceClass.WIND_DIRECTION,
+            DEGREE,
+            SensorStateClass.MEASUREMENT_ANGLE,
+        ),
+    )
+}
+
+
+def _all_entities(coordinator: SolarEdgeCoordinator) -> list[SensorEntity]:
+    """Build every entity the site currently supports."""
+    entities: list[SensorEntity] = [
+        SolarEdgeSensor(coordinator, description)
+        for description in SENSORS
+        if description.exists_fn(coordinator)
+    ]
+    batteries = coordinator.battery_serials if coordinator.has_battery else []
+    chargers = coordinator.ev_charger_serials if coordinator.has_ev_charger else []
+    device_groups = (
+        (batteries, BATTERY_SENSORS, "Battery"),
+        (coordinator.inverter_status, INVERTER_SENSORS, "Inverter"),
+        (chargers, EV_CHARGER_SENSORS, "EV charger"),
+    )
+    entities.extend(
+        SolarEdgeDeviceSensor(coordinator, serial, description, kind)
+        for serials, descriptions, kind in device_groups
+        for serial in serials
+        for description in descriptions
+    )
+    if coordinator.has_env_sensors:
+        entities.extend(
+            SolarEdgeEnvironmentSensor(
+                coordinator, device.serial_number, ENVIRONMENT_SENSORS[device.measurement]
+            )
+            for device in coordinator.active_devices("SENSOR")
+            if device.measurement in ENVIRONMENT_SENSORS
+        )
+    return entities
 
 
 async def async_setup_entry(
@@ -236,20 +396,19 @@ async def async_setup_entry(
     entry: SolarEdgeConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up SolarEdge sensors."""
+    """Set up SolarEdge sensors, adding more as new devices and values appear."""
     coordinator = entry.runtime_data
-    entities: list[SensorEntity] = [
-        SolarEdgeSensor(coordinator, description)
-        for description in SENSORS
-        if description.exists_fn(coordinator)
-    ]
-    if coordinator.has_battery:
-        entities.extend(
-            SolarEdgeBatterySensor(coordinator, serial, description)
-            for serial in coordinator.battery_serials
-            for description in BATTERY_SENSORS
-        )
-    async_add_entities(entities)
+    known: set[str | None] = set()
+
+    @callback
+    def _add_new_entities() -> None:
+        entities = [e for e in _all_entities(coordinator) if e.unique_id not in known]
+        known.update(entity.unique_id for entity in entities)
+        if entities:
+            async_add_entities(entities)
+
+    _add_new_entities()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
 class SolarEdgeSensor(CoordinatorEntity[SolarEdgeCoordinator], SensorEntity):
@@ -273,37 +432,65 @@ class SolarEdgeSensor(CoordinatorEntity[SolarEdgeCoordinator], SensorEntity):
         return self.entity_description.value_fn(self.coordinator)
 
 
-class SolarEdgeBatterySensor(CoordinatorEntity[SolarEdgeCoordinator], SensorEntity):
-    """A sensor for one battery, on its own device."""
+class SolarEdgeDeviceSensor(CoordinatorEntity[SolarEdgeCoordinator], SensorEntity):
+    """A sensor for one battery, inverter or EV charger, on that device."""
 
     _attr_has_entity_name = True
-    entity_description: SolarEdgeBatterySensorDescription
+    entity_description: SolarEdgeDeviceSensorDescription
 
     def __init__(
         self,
         coordinator: SolarEdgeCoordinator,
         serial: str,
-        description: SolarEdgeBatterySensorDescription,
+        description: SolarEdgeDeviceSensorDescription,
+        kind: str,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.entity_description = description
         self._serial = serial
         self._attr_unique_id = f"{coordinator.site_id}_{serial}_{description.key}"
-        device = coordinator.battery_device(serial)
+        device = coordinator.inventory_device(serial)
+        # The API can call every battery just "Battery", which tells them apart from nothing.
+        name = device.name if device and device.name not in (None, kind) else f"{kind} {serial}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, serial)},
-            name=(device.name if device and device.name else f"Battery {serial}"),
+            name=name,
             manufacturer=(device.manufacturer if device and device.manufacturer else "SolarEdge"),
-            model=(device.model if device and device.model else "Battery"),
+            model=(device.model if device and device.model else kind),
             sw_version=device.firmware if device else None,
             serial_number=serial,
-            via_device=(DOMAIN, str(coordinator.site_id)),
         )
+        # HA 2026.10 links the parent by registry id; the identifier form is deprecated.
+        if coordinator.site_device_id:
+            self._attr_device_info["via_device_id"] = coordinator.site_device_id
+
+    @property
+    def native_value(self) -> float | str | None:
+        """Return the sensor value."""
+        values = self.entity_description.source(self.coordinator)
+        return values.get(self._serial, {}).get(self.entity_description.key)
+
+
+class SolarEdgeEnvironmentSensor(CoordinatorEntity[SolarEdgeCoordinator], SensorEntity):
+    """An environmental sensor; each measures one thing, so it sits on the site device."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: SolarEdgeCoordinator,
+        sensor_id: str,
+        description: SensorEntityDescription,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._sensor_id = sensor_id
+        self._attr_unique_id = f"{coordinator.site_id}_{sensor_id}"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, str(coordinator.site_id))})
 
     @property
     def native_value(self) -> float | None:
         """Return the sensor value."""
-        return self.coordinator.battery_values.get(self._serial, {}).get(
-            self.entity_description.key
-        )
+        return self.coordinator.sensor_values.get(self._sensor_id)

@@ -88,6 +88,24 @@
       },
       "pack_usable_capacity": {
         "default": "mdi:battery-high"
+      },
+      "pack_state_code": {
+        "default": "mdi:numeric"
+      },
+      "inverter_mode": {
+        "default": "mdi:solar-power"
+      },
+      "inverter_power_limit": {
+        "default": "mdi:speedometer"
+      },
+      "inverter_operation_mode": {
+        "default": "mdi:numeric"
+      },
+      "charger_power": {
+        "default": "mdi:ev-station"
+      },
+      "charger_energy": {
+        "default": "mdi:ev-station"
       }
     }
   }

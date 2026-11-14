@@ -30,6 +30,8 @@ class BudgetConfig:
     billing_day: int
     day_share: float
     energy_interval: timedelta
+    # None turns device status polling off.
+    status_interval: timedelta | None = None
 
 
 @dataclass(slots=True)
@@ -42,6 +44,7 @@ class PollPlan:
     energy_interval: timedelta | None
     projected_total: int
     cycle_end: datetime
+    status_interval: timedelta | None = None
 
 
 def _anchor(reference: datetime, year: int, month: int, billing_day: int) -> datetime:
@@ -113,6 +116,7 @@ def plan(
     energy_calls: int,
     is_day: bool,
     day_hours: float,
+    status_calls: int = 0,
 ) -> PollPlan:
     """Work out polling intervals that keep the cycle within budget."""
     _, cycle_end = cycle_bounds(now, config.billing_day)
@@ -123,6 +127,9 @@ def plan(
     secs_left = max((cycle_end - now).total_seconds(), 3600.0)
     days_left = secs_left / 86400
     reserve = INVENTORY_CALLS * days_left / 7
+    status_interval = config.status_interval if status_calls else None
+    if status_interval:
+        reserve += status_calls * secs_left / status_interval.total_seconds()
     usable = max(remaining - reserve, 0.0)
 
     energy_interval: timedelta | None = None
@@ -165,6 +172,7 @@ def plan(
         energy_interval=energy_interval,
         projected_total=projected,
         cycle_end=cycle_end,
+        status_interval=_floor(status_interval),
     )
 
 

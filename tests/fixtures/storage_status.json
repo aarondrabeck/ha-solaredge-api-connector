@@ -1,0 +1,28 @@
+{
+  "period": {
+    "from": "2026-10-12T00:00:00-05:00",
+    "to": "2026-10-12T12:00:00-05:00"
+  },
+  "resolution": "QUARTER_HOUR",
+  "storage": {
+    "BATT-001": {
+      "batteryState": {
+        "values": [
+          {
+            "timestamp": "2026-10-12T11:30:00-05:00",
+            "value": 4
+          }
+        ]
+      },
+      "internalTemperature": {
+        "unit": "CELSIUS",
+        "values": [
+          {
+            "timestamp": "2026-10-12T11:30:00-05:00",
+            "value": 28.3
+          }
+        ]
+      }
+    }
+  }
+}

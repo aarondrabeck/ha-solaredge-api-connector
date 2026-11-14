@@ -44,6 +44,12 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Enable loading the custom integration in all tests."""
 
 
+@pytest.fixture(autouse=True)
+def no_call_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lift the per-minute limiter, which would really sleep under a frozen clock."""
+    monkeypatch.setattr("custom_components.solaredge_v2.api.MAX_CALLS_PER_MINUTE", 1_000)
+
+
 @pytest.fixture
 async def setup_credentials(hass: HomeAssistant) -> None:
     """Register application credentials."""
@@ -87,4 +93,6 @@ def mock_api(aioclient_mock: AiohttpClientMocker) -> AiohttpClientMocker:
     aioclient_mock.get(
         f"{SITE_URL}/storage/lifetime-energy", json=load_json("storage_lifetime.json")
     )
+    aioclient_mock.get(f"{SITE_URL}/inverters/status", json=load_json("inverters_status.json"))
+    aioclient_mock.get(f"{SITE_URL}/storage/status", json=load_json("storage_status.json"))
     return aioclient_mock

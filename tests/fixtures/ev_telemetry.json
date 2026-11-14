@@ -1,0 +1,33 @@
+{
+  "period": {
+    "from": "2026-10-12T09:00:00-05:00",
+    "to": "2026-10-12T12:00:00-05:00"
+  },
+  "resolution": "QUARTER_HOUR",
+  "evChargers": {
+    "99123456-A5": {
+      "chargingPower": {
+        "unit": "W",
+        "values": [
+          {
+            "timestamp": "2026-10-12T11:15:00-05:00",
+            "value": 7210.5
+          },
+          {
+            "timestamp": "2026-10-12T11:30:00-05:00",
+            "value": null
+          }
+        ]
+      },
+      "chargingEnergy": {
+        "unit": "WH",
+        "values": [
+          {
+            "timestamp": "2026-10-12T11:15:00-05:00",
+            "value": 1802
+          }
+        ]
+      }
+    }
+  }
+}

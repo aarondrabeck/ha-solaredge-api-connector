@@ -17,11 +17,15 @@ from typing import Any
 
 import aiohttp
 
-from .const import API_BASE_URL, MAX_CALLS_PER_MINUTE
+from .const import API_BASE_URL, LIFETIME_START, MAX_CALLS_PER_MINUTE
 
 _LOGGER = logging.getLogger(__name__)
 
+# A retry delay longer than this means the monthly allowance is gone, not the per-minute one.
+MAX_RATE_LIMIT_RETRY_SECONDS = 3600
+
 type Series = list[tuple[datetime, float]]
+type DeviceStatus = dict[str, dict[str, float | str]]
 
 
 class SolarEdgeError(Exception):
@@ -42,6 +46,10 @@ class SolarEdgeForbiddenError(SolarEdgeError):
 
 class SolarEdgeNotFoundError(SolarEdgeError):
     """The site or device does not exist (404)."""
+
+
+class SolarEdgeBadRequestError(SolarEdgeError):
+    """The API refused the request, e.g. a window that is too long (400)."""
 
 
 class SolarEdgeRateLimitError(SolarEdgeError):
@@ -109,6 +117,10 @@ class Device:
     firmware: str | None = None
     parent_serial: str | None = None
     meter_type: str | None = None
+    # False once the device was removed or replaced.
+    active: bool = True
+    # What an environmental sensor measures, e.g. PLANE_OF_ARRAY.
+    measurement: str | None = None
 
 
 @dataclass(slots=True)
@@ -183,6 +195,8 @@ class SolarEdgeClient:
     async def _raise_for_status(resp: aiohttp.ClientResponse, body: str) -> None:
         status = resp.status
         _LOGGER.debug("SolarEdge %s %s: %s", status, resp.url.path, body[:300])
+        if status == 400:
+            raise SolarEdgeBadRequestError(body[:200])
         if status == 401:
             raise SolarEdgeAuthError(body[:200])
         if status == 403:
@@ -192,11 +206,15 @@ class SolarEdgeClient:
         if status == 429:
             remaining_minute = resp.headers.get("x-ratelimit-remaining-minute")
             retry_after = resp.headers.get("retry-after")
-            if "credit limit" in body.lower() or (
-                remaining_minute is not None and remaining_minute != "0" and retry_after is None
+            delay = float(retry_after) if retry_after else None
+            if (
+                "credit limit" in body.lower()
+                or resp.headers.get("x-ratelimit-remaining-month") == "0"
+                or (delay is not None and delay > MAX_RATE_LIMIT_RETRY_SECONDS)
+                or (remaining_minute not in (None, "0") and delay is None)
             ):
                 raise SolarEdgeCreditLimitError(body[:200])
-            raise SolarEdgeRateLimitError(float(retry_after) if retry_after else None)
+            raise SolarEdgeRateLimitError(delay)
         raise SolarEdgeError(f"HTTP {status}: {body[:200]}")
 
     # --- Sites -----------------------------------------------------------------
@@ -214,17 +232,19 @@ class SolarEdgeClient:
         )
 
     async def get_devices(self, site_id: int) -> list[Device]:
-        """Return inverters, meters and batteries installed at the site."""
-        params = [("types", t) for t in ("INVERTER", "METER", "BATTERY")]
+        """Return the inverters, meters, batteries, EV chargers and sensors at the site."""
+        params = [("types", t) for t in ("INVERTER", "METER", "BATTERY", "EV_CHARGER", "SENSOR")]
         data = await self._get(f"/sites/{site_id}/devices", params)
         devices: list[Device] = []
         for item in data or []:
-            if not item.get("serialNumber"):
+            # Environmental sensors have an id instead of a serial number.
+            serial = item.get("serialNumber") or item.get("id")
+            if not serial:
                 continue
             parent = item.get("parent") or {}
             devices.append(
                 Device(
-                    serial_number=item["serialNumber"],
+                    serial_number=serial,
                     type=item.get("type") or "UNKNOWN",
                     name=item.get("name"),
                     manufacturer=item.get("manufacturer"),
@@ -232,6 +252,8 @@ class SolarEdgeClient:
                     firmware=item.get("firmware") or item.get("firmwareVersion"),
                     parent_serial=parent.get("serialNumber") or item.get("connectedTo"),
                     meter_type=item.get("meterType"),
+                    active=item.get("active") is not False,
+                    measurement=item.get("measurement"),
                 )
             )
         return devices
@@ -248,18 +270,6 @@ class SolarEdgeClient:
             ],
         )
         return parse_series(data.get("values"))
-
-    async def get_site_lifetime_energy(self, site_id: int) -> tuple[datetime | None, float | None]:
-        """Return the site production lifetime counter (Wh) and its timestamp."""
-        data = await self._get(f"/sites/{site_id}/lifetime-energy")
-        energy = data.get("energy")
-        if energy is None:
-            return None, None
-        updated = data.get("lastUpdateTime")
-        return (
-            parse_datetime(updated) if updated else None,
-            scale_to_base(float(energy), data.get("unit")),
-        )
 
     # --- Bulk telemetry --------------------------------------------------------
 
@@ -283,6 +293,51 @@ class SolarEdgeClient:
         )
         return self._parse_telemetry(data.get("storage"))
 
+    async def get_ev_charger_telemetry(
+        self, site_id: int, start: datetime, end: datetime
+    ) -> DeviceTelemetry:
+        """Return charging power and energy for all EV chargers."""
+        data = await self._get(
+            f"/sites/{site_id}/ev-chargers/telemetry",
+            [("from", format_datetime(start)), ("to", format_datetime(end))],
+        )
+        return self._parse_telemetry(data.get("evChargers"))
+
+    async def get_ev_charger_lifetime_energy(self, site_id: int, end: datetime) -> dict[str, float]:
+        """Return the energy each EV charger has delivered so far (Wh).
+
+        Chargers have no onboard counter; TOTAL sums their whole history instead.
+        """
+        data = await self._get(
+            f"/sites/{site_id}/ev-chargers/telemetry",
+            [
+                ("from", format_datetime(LIFETIME_START)),
+                ("to", format_datetime(end)),
+                ("resolution", "TOTAL"),
+            ],
+        )
+        totals: dict[str, float] = {}
+        for serial, metrics in (data.get("evChargers") or {}).items():
+            energy = (metrics or {}).get("chargingEnergy") or {}
+            values = [i["value"] for i in energy.get("values") or [] if i.get("value") is not None]
+            if values:
+                totals[serial] = scale_to_base(float(values[-1]), energy.get("unit"))
+        return totals
+
+    async def get_sensor_telemetry(
+        self, site_id: int, start: datetime, end: datetime
+    ) -> dict[str, float]:
+        """Return the latest reading of each environmental sensor, keyed by sensor id."""
+        data = await self._get(
+            f"/sites/{site_id}/sensors/telemetry",
+            [("from", format_datetime(start)), ("to", format_datetime(end))],
+        )
+        readings: dict[str, float] = {}
+        for sensor_id, sensor in (data.get("sensors") or {}).items():
+            if series := parse_series((sensor or {}).get("values")):
+                readings[sensor_id] = series[-1][1]
+        return readings
+
     @staticmethod
     def _parse_telemetry(raw: dict[str, Any] | None) -> DeviceTelemetry:
         telemetry = DeviceTelemetry()
@@ -302,7 +357,64 @@ class SolarEdgeClient:
             telemetry.units[serial] = units
         return telemetry
 
+    # --- Device status ---------------------------------------------------------
+
+    async def get_inverter_status(
+        self, site_id: int, start: datetime, end: datetime
+    ) -> DeviceStatus:
+        """Return the last known mode, temperature and power limit of each inverter."""
+        data = await self._get(
+            f"/sites/{site_id}/inverters/status",
+            [("from", format_datetime(start)), ("to", format_datetime(end))],
+        )
+        return self._latest_status(data.get("inverters"))
+
+    async def get_storage_status(
+        self, site_id: int, start: datetime, end: datetime
+    ) -> DeviceStatus:
+        """Return the last known state code and internal temperature of each battery."""
+        data = await self._get(
+            f"/sites/{site_id}/storage/status",
+            [("from", format_datetime(start)), ("to", format_datetime(end))],
+        )
+        return self._latest_status(data.get("storage"))
+
+    @staticmethod
+    def _latest_status(raw: dict[str, Any] | None) -> DeviceStatus:
+        """Keep the newest sample per metric; unlike telemetry, values can be strings."""
+        status: DeviceStatus = {}
+        for serial, metrics in (raw or {}).items():
+            latest: dict[str, float | str] = {}
+            for metric, payload in (metrics or {}).items():
+                if not isinstance(payload, dict):
+                    continue
+                samples = payload.get("values") or []
+                values = [i["value"] for i in samples if i.get("value") is not None]
+                if values:
+                    latest[metric] = values[-1]
+            status[serial] = latest
+        return status
+
     # --- Lifetime counters -----------------------------------------------------
+
+    async def get_inverter_lifetime_energy(
+        self, site_id: int, start: datetime, end: datetime
+    ) -> CounterReadings:
+        """Return onboard inverter production counters."""
+        data = await self._get(
+            f"/sites/{site_id}/inverters/lifetime-energy",
+            [("from", format_datetime(start)), ("to", format_datetime(end))],
+        )
+        readings = CounterReadings()
+        for inverter in data.get("inverters") or []:
+            serial = inverter.get("serialNumber") or "inverter"
+            series = parse_series(inverter.get("lifetimeEnergy"))
+            if series:
+                unit = inverter.get("unit")
+                readings.directions.setdefault("lifetimeEnergy", {})[serial] = [
+                    (ts, scale_to_base(v, unit)) for ts, v in series
+                ]
+        return readings
 
     async def get_meter_lifetime_energy(
         self, site_id: int, start: datetime, end: datetime

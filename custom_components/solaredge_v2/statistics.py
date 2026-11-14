@@ -33,9 +33,6 @@ STATISTIC_NAMES: dict[str, str] = {
     "battery_discharge": "Battery discharge",
 }
 
-# Readings below the previous one by more than this are treated as a counter reset.
-RESET_TOLERANCE_WH = 1.0
-
 
 def statistic_id(site_id: int, key: str) -> str:
     """Return the external statistic id for a counter."""
@@ -83,8 +80,9 @@ def accumulate(
     """Turn hourly counter totals into new statistic sums, updating ``state``.
 
     ``state`` holds ``last_hour``, ``last_raw`` and ``offset`` so hours already
-    imported are skipped and a counter reset (e.g. a replaced meter) does not
-    produce negative energy.
+    imported are skipped. Counters do step back: battery counters by a few kWh,
+    and a replaced meter to near zero. ``offset`` absorbs exactly the step, so
+    the sum holds still for that hour rather than falling or jumping.
     """
     last_hour = datetime.fromisoformat(state["last_hour"]) if state.get("last_hour") else None
     last_raw: float | None = state.get("last_raw")
@@ -93,8 +91,8 @@ def accumulate(
     for hour, raw in hourly:
         if last_hour is not None and hour <= last_hour:
             continue
-        if last_raw is not None and raw < last_raw - RESET_TOLERANCE_WH:
-            offset += last_raw
+        if last_raw is not None and raw < last_raw:
+            offset += last_raw - raw
         last_raw, last_hour = raw, hour
         rows.append((hour, raw + offset))
     if last_hour is not None:

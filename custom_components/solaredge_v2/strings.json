@@ -75,13 +75,15 @@
           "monthly_budget": "Credits per billing cycle",
           "billing_day": "Billing cycle start day",
           "day_share": "Share of power polls during daylight",
-          "energy_interval_hours": "Energy counter interval"
+          "energy_interval_hours": "Energy counter interval",
+          "status_interval_hours": "Device status interval"
         },
         "data_description": {
           "monthly_budget": "Free tier is 2,000/month. Keep some margin for restarts and other apps on the same developer account.",
           "billing_day": "Day of month your credits reset (the anniversary of your plan start, shown under Usage in the developer console).",
           "day_share": "Percentage of power refreshes spent between sunrise and sunset.",
-          "energy_interval_hours": "Hours between lifetime counter fetches. Statistics are backfilled per hour, so a longer interval only delays them."
+          "energy_interval_hours": "Hours between lifetime counter fetches. Statistics are backfilled per hour, so a longer interval only delays them.",
+          "status_interval_hours": "Hours between inverter and battery status fetches, which cost one credit per device type. 0 turns them off."
         }
       }
     }
@@ -184,6 +186,54 @@
       },
       "pack_usable_capacity": {
         "name": "Usable capacity"
+      },
+      "pack_internal_temperature": {
+        "name": "Internal temperature"
+      },
+      "pack_state_code": {
+        "name": "State code"
+      },
+      "inverter_mode": {
+        "name": "Mode"
+      },
+      "inverter_temperature": {
+        "name": "Temperature"
+      },
+      "inverter_power_limit": {
+        "name": "Power limit"
+      },
+      "inverter_operation_mode": {
+        "name": "Operation mode code"
+      },
+      "charger_power": {
+        "name": "Charging power"
+      },
+      "charger_energy": {
+        "name": "Charging energy"
+      },
+      "plane_of_array": {
+        "name": "Plane of array irradiance"
+      },
+      "global_horizontal": {
+        "name": "Global horizontal irradiance"
+      },
+      "direct": {
+        "name": "Direct irradiance"
+      },
+      "diffused": {
+        "name": "Diffuse irradiance"
+      },
+      "module": {
+        "name": "Module temperature"
+      },
+      "ambient": {
+        "name": "Ambient temperature"
+      },
+      "wind_speed": {
+        "name": "Wind speed"
+      },
+      "wind_direction": {
+        "name": "Wind direction"
       }
     }
   },

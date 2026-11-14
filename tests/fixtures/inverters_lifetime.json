@@ -1,0 +1,27 @@
+{
+  "inverters": [
+    {
+      "serialNumber": "7E1234AB-CD",
+      "lifetimeEnergy": [
+        {
+          "timestamp": "2026-10-12T15:03:30Z",
+          "value": 48341
+        },
+        {
+          "timestamp": "2026-10-12T15:48:30Z",
+          "value": 48400
+        },
+        {
+          "timestamp": "2026-10-12T16:03:30Z",
+          "value": 48500
+        }
+      ],
+      "unit": "KWH"
+    },
+    {
+      "serialNumber": "7E1234AB-CE",
+      "lifetimeEnergy": [],
+      "unit": "WH"
+    }
+  ]
+}

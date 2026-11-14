@@ -25,14 +25,17 @@ Every call costs one credit, so it polls in groups and spaces them out based on 
 
 | Group | Endpoints | Credits | Default cadence |
 |---|---|---|---|
-| Power | `meters/telemetry` + `storage/telemetry` | 2 | about every 40 min in daylight, about every 3 h at night (adaptive) |
-| Energy | `meters/lifetime-energy` + `storage/lifetime-energy` | 2 | every 3 h |
+| Power | `meters/telemetry` + `storage/telemetry` (+ `ev-chargers/telemetry`, `sensors/telemetry` if the site has them) | 2 | about every 40 min in daylight, about every 3 h at night (adaptive) |
+| Energy | `meters/lifetime-energy` + `storage/lifetime-energy` (`inverters/lifetime-energy` without a production meter, + an EV charger total) | 2 | every 3 h |
+| Status | `inverters/status` + `storage/status` | 2 | every 12 h (set 0 to turn off) |
 | Inventory | `sites/{id}` + `devices` | 2 | weekly (cached across restarts) |
+
+Calls for EV chargers, environmental sensors and batteries are only made when the inventory lists them. A call SolarEdge refuses (403, 404, 400) is skipped until the next weekly inventory refresh rather than retried.
 
 - **Adaptive.** Each 5-minute tick recomputes intervals from the remaining credits and the days left in the cycle. If restarts or other usage eat credits, polling slows down instead of running out.
 - **Restart-safe.** The last values, credit ledger and inventory are stored on disk, so restarting Home Assistant costs no credits.
-- **No data loss from slow polling.** Lifetime counters carry 15-minute timestamps. Each fetch backfills every hour since the previous one into long-term statistics.
-- **Hard stop.** On SolarEdge's `429 Monthly credit limit reached`, polling pauses and a repair issue appears until the cycle resets.
+- **No data loss from slow polling.** Lifetime counters carry 15-minute timestamps. Each fetch backfills every hour since the previous one into long-term statistics. SolarEdge allows 12 hours per counter request, so after a longer outage the gap is fetched one window per 5-minute tick, up to 7 days back.
+- **Hard stop.** On SolarEdge's `429 Monthly credit limit reached` (or `x-ratelimit-remaining-month: 0`), polling pauses and a repair issue appears until the cycle resets.
 - **Bulk endpoints.** One telemetry call returns every meter or battery and every metric.
 
 The ledger counts only this integration's calls. If other apps share your developer account, lower the budget in the options.
@@ -77,16 +80,25 @@ Requires Home Assistant **2026.10** or newer.
 | Credits per billing cycle | 1800 | Free tier = 2,000. Leave headroom. |
 | Billing cycle start day | 1 | The day your credits reset (see *Usage* in the developer console). |
 | Share of power polls during daylight | 75 % | Spends more refreshes while the sun is up. |
-| Energy counter interval | 3 h | Statistics are backfilled per hour, so a longer interval only delays them. |
+| Energy counter interval | 3 h | Statistics are backfilled per hour, so a longer interval only delays them. Above 11 h it saves nothing, because each fetch is split into 12-hour windows. |
+| Device status interval | 12 h | Inverter mode and temperature, battery temperature. 0 turns these calls off. |
 
 ## Entities
 
-Site-wide entities belong to the site device. Each battery also gets its own device (model, firmware, serial) with **State of charge**, **Power** (+ discharge), **Remaining energy** and **Usable capacity**, from the same telemetry call, so no extra credits. Inverters and meters are not added as devices because they would have no entities; their details are in the diagnostics.
+Site-wide entities belong to the site device. Meters are not added as devices because they would have no entities; their details are in the diagnostics. New devices get their entities as soon as they first report, without a restart.
+
+**Each battery** gets its own device (model, firmware, serial) with **State of charge**, **Power** (+ discharge), **Remaining energy** and **Usable capacity** from the shared telemetry call, plus **Internal temperature** and a disabled-by-default **State code** from the status call.
+
+**Each inverter** gets a device with **Mode** (`MPPT`, `STARTING`, `FAULT`, `STANDBY`, `LOCKED_*` …), **Temperature**, **Power limit** and a disabled-by-default **Operation mode code**.
+
+**Each EV charger** gets a device with **Charging power** and **Charging energy** (lifetime, `total_increasing`).
+
+**Environmental sensors** on a commercial gateway or Edge Hub (irradiance, module or ambient temperature, wind speed and direction) appear on the site device.
 
 | Entity | Unit | Notes |
 |---|---|---|
 | Solar power | kW | Production meter, or site power if there's no production meter |
-| Home power | kW | Needs a consumption meter |
+| Home power | kW | Consumption meter, or SolarEdge's calculated consumption if there isn't one |
 | Grid power | kW | **+ import / − export** (HA standard) |
 | Grid import power / Grid export power | kW | Both positive |
 | Battery power | kW | **+ discharge / − charge** (HA standard) |
@@ -94,7 +106,7 @@ Site-wide entities belong to the site device. Each battery also gets its own dev
 | Battery state of charge | % | Capacity-weighted across batteries |
 | Battery remaining energy / usable capacity | kWh | Usable capacity = remaining ÷ SoC |
 | Grid status / Battery status | enum | importing · exporting · idle / charging · discharging · idle |
-| Solar / Home / Grid import / Grid export / Battery charge / Battery discharge energy | kWh | Lifetime onboard counters, `total_increasing` |
+| Solar / Home / Grid import / Grid export / Battery charge / Battery discharge energy | kWh | Lifetime onboard counters, `total_increasing`. Solar comes from the inverters when there's no production meter. |
 | API credits used / remaining / projected | credits | Diagnostic |
 | Data timestamp / Next API update | timestamp | Diagnostic. SolarEdge data usually lags 15–30 min. |
 
@@ -141,6 +153,8 @@ Remove the old `rest:` block, and revoke the Beta keys if you can.
 - **"Credits exhausted" repair:** the developer account hit its monthly limit. Lower the budget or check for other apps on the account.
 - **Landed on the Home Assistant dashboard after approving?** The *Returned URL* in your SolarEdge app points at your HA root. Set it, and the Redirect URI, to the callback address shown in the setup dialog, or use manual sign-in.
 - **Reauthentication requested:** the 24-month grant expired or was revoked. Sign in again from the notification.
+- **Two devices for one SolarEdge Energy Bank:** SolarEdge shortened Energy Bank serials (for example `6308B0FB-16` became `6308B0FB`), which created a second device. From 0.2.0 the original device, with its history, area and entity IDs, takes over the short serial and the duplicate is removed on the next restart.
+- **Huge one-hour spikes in battery statistics before 0.2.0:** battery counters sometimes step back a few kWh, and earlier versions took that for a meter reset and added the whole counter again. 0.2.0 stops new spikes. Past ones stay in the recorder; fix them under *Tools → Statistics* (adjust sum) if you chart those statistics.
 
 ## Development
 

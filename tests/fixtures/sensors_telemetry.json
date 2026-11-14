@@ -1,0 +1,32 @@
+{
+  "period": {
+    "from": "2026-10-12T09:00:00-05:00",
+    "to": "2026-10-12T12:00:00-05:00"
+  },
+  "resolution": "QUARTER_HOUR",
+  "sensors": {
+    "67001234_PLANE_OF_ARRAY": {
+      "sensorType": "IRRADIANCE",
+      "measurement": "PLANE_OF_ARRAY",
+      "connectedTo": "67001234-71",
+      "unit": "W_PER_M2",
+      "values": [
+        {
+          "timestamp": "2026-10-12T11:15:00-05:00",
+          "value": 812.4
+        },
+        {
+          "timestamp": "2026-10-12T11:30:00-05:00",
+          "value": 830.1
+        }
+      ]
+    },
+    "67001234_MODULE": {
+      "sensorType": "TEMPERATURE",
+      "measurement": "MODULE",
+      "connectedTo": "67001234-71",
+      "unit": "CELSIUS",
+      "values": []
+    }
+  }
+}

@@ -35,10 +35,12 @@ from .const import (
     CONF_ENERGY_INTERVAL,
     CONF_MONTHLY_BUDGET,
     CONF_SITE_ID,
+    CONF_STATUS_INTERVAL,
     DEFAULT_BILLING_DAY,
     DEFAULT_DAY_SHARE,
     DEFAULT_ENERGY_INTERVAL,
     DEFAULT_MONTHLY_BUDGET,
+    DEFAULT_STATUS_INTERVAL,
     DOMAIN,
     OAUTH2_ACCESS_DURATION,
     OAUTH2_AUTHORIZE,
@@ -313,6 +315,12 @@ class SolarEdgeOptionsFlow(OptionsFlowWithReload):
                     default=options.get(CONF_ENERGY_INTERVAL, DEFAULT_ENERGY_INTERVAL),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=24, step=1, unit_of_measurement="h")
+                ),
+                vol.Required(
+                    CONF_STATUS_INTERVAL,
+                    default=options.get(CONF_STATUS_INTERVAL, DEFAULT_STATUS_INTERVAL),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=24, step=1, unit_of_measurement="h")
                 ),
             }
         )

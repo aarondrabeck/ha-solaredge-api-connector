@@ -15,7 +15,11 @@ from homeassistant.exceptions import (
     OAuth2TokenRequestBaseError,
     OAuth2TokenRequestReauthError,
 )
-from homeassistant.helpers import device_registry as dr, issue_registry as ir
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.sun import get_astral_event_date, is_up
@@ -25,14 +29,17 @@ from homeassistant.util import dt as dt_util
 from .api import (
     CounterReadings,
     Device,
+    DeviceStatus,
     DeviceTelemetry,
     Series,
     SiteInfo,
     SolarEdgeAuthError,
+    SolarEdgeBadRequestError,
     SolarEdgeClient,
     SolarEdgeCreditLimitError,
     SolarEdgeError,
     SolarEdgeForbiddenError,
+    SolarEdgeNotFoundError,
     SolarEdgeRateLimitError,
 )
 from .budget import BudgetConfig, CreditLedger, PollPlan, is_due, plan
@@ -42,14 +49,17 @@ from .const import (
     CONF_ENERGY_INTERVAL,
     CONF_MONTHLY_BUDGET,
     CONF_SITE_ID,
-    COUNTER_BACKFILL,
-    COUNTER_MAX_WINDOW,
+    CONF_STATUS_INTERVAL,
+    COUNTER_MAX_CATCHUP,
     DEFAULT_BILLING_DAY,
     DEFAULT_DAY_SHARE,
     DEFAULT_ENERGY_INTERVAL,
     DEFAULT_MONTHLY_BUDGET,
+    DEFAULT_STATUS_INTERVAL,
     DOMAIN,
     INVENTORY_REFRESH,
+    INVENTORY_VERSION,
+    MAX_QUERY_WINDOW,
     MONITORING_URL,
     STORAGE_VERSION,
     TELEMETRY_LOOKBACK,
@@ -78,6 +88,20 @@ STORAGE_COUNTER_KEYS = {
     "lifetimeEnergyCharged": "battery_charge",
     "lifetimeEnergyDischarged": "battery_discharge",
 }
+INVERTER_COUNTER_KEYS = {"lifetimeEnergy": "solar"}
+INVERTER_STATUS_KEYS = {
+    "inverterMode": "mode",
+    "temperature": "temperature",
+    "powerLimit": "power_limit",
+    "operationMode": "operation_mode",
+}
+STORAGE_STATUS_KEYS = {
+    "internalTemperature": "internal_temperature",
+    "batteryState": "state_code",
+}
+# Endpoints that some sites or plans refuse; each inventory refresh tries them again.
+OPTIONAL_CAPABILITIES = ("ev_chargers", "sensors", "inverter_status", "storage_status")
+PRODUCTION_METER_TYPES = ("Production", "ExternalProduction")
 FAILURE_BACKOFF_MIN = timedelta(minutes=15)
 FAILURE_BACKOFF_MAX = timedelta(hours=3)
 
@@ -90,6 +114,24 @@ def latest_total(telemetry: DeviceTelemetry, metric: str) -> tuple[datetime, flo
     if not points:
         return None
     return max(ts for ts, _ in points), sum(value for _, value in points)
+
+
+def steady_total(previous: float | None, total: float) -> float:
+    """Hold a lifetime total through a dip; a drop over 10 % is a real reset, as in HA."""
+    if previous is not None and 0.9 * previous <= total < previous:
+        return previous
+    return total
+
+
+def merge_status(
+    target: dict[str, dict[str, Any]], status: DeviceStatus, keys: dict[str, str]
+) -> None:
+    """Merge status samples into ``target``, keeping the last known value of the rest."""
+    for serial, metrics in status.items():
+        values = target.setdefault(serial, {})
+        for metric, key in keys.items():
+            if metric in metrics:
+                values[key] = metrics[metric]
 
 
 SOC_FRACTION = "fraction"
@@ -194,21 +236,29 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
         self.site: SiteInfo | None = None
         self.devices: list[Device] = []
         self.inventory_updated: datetime | None = None
+        # Registry id of the site device, the parent of every other device.
+        self.site_device_id: str | None = None
         # None = unknown yet, True/False once a call has told us.
         self.capabilities: dict[str, bool | None] = {
             "meters": None,
             "storage": None,
             "site_power": False,
-            "site_lifetime": False,
+            "inverter_lifetime": False,
+            **dict.fromkeys(OPTIONAL_CAPABILITIES),
         }
         self.values: dict[str, float] = {}
         self.battery_values: dict[str, dict[str, float]] = {}
+        self.ev_values: dict[str, dict[str, float]] = {}
+        self.sensor_values: dict[str, float] = {}
+        self.inverter_status: dict[str, dict[str, Any]] = {}
+        self.battery_status: dict[str, dict[str, Any]] = {}
         self.soc_scales: dict[str, str] = {}
         # Last unit/value per battery metric, for diagnostics.
         self.raw_storage: dict[str, dict[str, Any]] = {}
         self.data_timestamp: datetime | None = None
         self.last_power: datetime | None = None
         self.last_energy: datetime | None = None
+        self.last_status: datetime | None = None
         self.counter_cursor: datetime | None = None
         self.counter_state: dict[str, dict[str, Any]] = {}
         self.poll_plan: PollPlan | None = None
@@ -221,6 +271,7 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
     def budget_config(self) -> BudgetConfig:
         """Budget options with defaults."""
         options = self.config_entry.options
+        status_hours = float(options.get(CONF_STATUS_INTERVAL, DEFAULT_STATUS_INTERVAL))
         return BudgetConfig(
             monthly_budget=int(options.get(CONF_MONTHLY_BUDGET, DEFAULT_MONTHLY_BUDGET)),
             billing_day=int(options.get(CONF_BILLING_DAY, DEFAULT_BILLING_DAY)),
@@ -228,6 +279,7 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             energy_interval=timedelta(
                 hours=float(options.get(CONF_ENERGY_INTERVAL, DEFAULT_ENERGY_INTERVAL))
             ),
+            status_interval=timedelta(hours=status_hours) if status_hours else None,
         )
 
     @property
@@ -240,7 +292,26 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
         """Whether the site has storage (inventory or telemetry says so)."""
         if self.capabilities["storage"] is not None:
             return bool(self.capabilities["storage"])
-        return any(device.type == "BATTERY" for device in self.devices)
+        return bool(self.active_devices("BATTERY"))
+
+    @property
+    def has_ev_charger(self) -> bool:
+        """Whether the site has an EV charger the API will report on."""
+        return bool(self.active_devices("EV_CHARGER")) and (
+            self.capabilities["ev_chargers"] is not False
+        )
+
+    @property
+    def has_env_sensors(self) -> bool:
+        """Whether the site has environmental sensors the API will report on."""
+        return bool(self.active_devices("SENSOR")) and self.capabilities["sensors"] is not False
+
+    @property
+    def has_production_meter(self) -> bool:
+        """Whether a meter, rather than the inverters, counts the site's production."""
+        return any(
+            device.meter_type in PRODUCTION_METER_TYPES for device in self.active_devices("METER")
+        )
 
     @property
     def power_calls(self) -> int:
@@ -248,15 +319,25 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
         calls = 0 if self.capabilities["meters"] is False else 1
         calls += 1 if self.capabilities["site_power"] else 0
         calls += 1 if self.has_battery else 0
+        calls += 1 if self.has_ev_charger else 0
+        calls += 1 if self.has_env_sensors else 0
         return max(calls, 1)
 
     @property
     def energy_calls(self) -> int:
         """Credits one energy-counter refresh costs."""
         calls = 0 if self.capabilities["meters"] is False else 1
-        calls += 1 if self.capabilities["site_lifetime"] else 0
+        calls += 1 if self.capabilities["inverter_lifetime"] else 0
         calls += 1 if self.has_battery else 0
+        calls += 1 if self.has_ev_charger else 0
         return max(calls, 1)
+
+    @property
+    def status_calls(self) -> int:
+        """Credits one device status refresh costs."""
+        calls = 0 if self.capabilities["inverter_status"] is False else 1
+        calls += 1 if self.has_battery and self.capabilities["storage_status"] is not False else 0
+        return calls
 
     @property
     def next_update(self) -> datetime | None:
@@ -268,6 +349,7 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             for last, interval in (
                 (self.last_power, self.poll_plan.power_interval),
                 (self.last_energy, self.poll_plan.energy_interval),
+                (self.last_status, self.poll_plan.status_interval),
             )
             if last and interval
         ]
@@ -298,6 +380,7 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             if self.site is None:
                 raise UpdateFailed(f"Could not load site {self.site_id}: {err}") from err
             _LOGGER.warning("Inventory refresh failed, using cached copy: %s", err)
+        self._migrate_battery_serials()
         self._register_devices()
 
     def _restore(self, stored: dict[str, Any]) -> None:
@@ -308,15 +391,28 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
         if site := stored.get("site"):
             self.site = SiteInfo(**site)
         self.devices = [Device(**device) for device in stored.get("devices", [])]
-        self.inventory_updated = _dt(stored.get("inventory_updated"))
-        self.capabilities.update(stored.get("capabilities", {}))
+        # An inventory from an older version lacks fields this one needs, so read it again.
+        if stored.get("inventory_version") == INVENTORY_VERSION:
+            self.inventory_updated = _dt(stored.get("inventory_updated"))
+        self.capabilities.update(
+            {
+                key: value
+                for key, value in stored.get("capabilities", {}).items()
+                if key in self.capabilities
+            }
+        )
         self.values = dict(stored.get("values", {}))
         self.data_timestamp = _dt(stored.get("data_timestamp"))
         self.last_power = _dt(stored.get("last_power"))
         self.last_energy = _dt(stored.get("last_energy"))
+        self.last_status = _dt(stored.get("last_status"))
         self.counter_cursor = _dt(stored.get("counter_cursor"))
         self.counter_state = stored.get("counter_state", {})
         self.battery_values = stored.get("battery_values", {})
+        self.ev_values = stored.get("ev_values", {})
+        self.sensor_values = stored.get("sensor_values", {})
+        self.inverter_status = stored.get("inverter_status", {})
+        self.battery_status = stored.get("battery_status", {})
         self.soc_scales = stored.get("soc_scales", {})
 
     def _data_to_save(self) -> dict[str, Any]:
@@ -328,14 +424,20 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             "site": asdict(self.site) if self.site else None,
             "devices": [asdict(device) for device in self.devices],
             "inventory_updated": _iso(self.inventory_updated),
+            "inventory_version": INVENTORY_VERSION,
             "capabilities": self.capabilities,
             "values": self.values,
             "data_timestamp": _iso(self.data_timestamp),
             "last_power": _iso(self.last_power),
             "last_energy": _iso(self.last_energy),
+            "last_status": _iso(self.last_status),
             "counter_cursor": _iso(self.counter_cursor),
             "counter_state": self.counter_state,
             "battery_values": self.battery_values,
+            "ev_values": self.ev_values,
+            "sensor_values": self.sensor_values,
+            "inverter_status": self.inverter_status,
+            "battery_status": self.battery_status,
             "soc_scales": self.soc_scales,
         }
 
@@ -367,38 +469,102 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
         except SolarEdgeForbiddenError:
             _LOGGER.warning("No DEVICE_DATA access; device inventory unavailable")
         self.inventory_updated = now
+        for capability in OPTIONAL_CAPABILITIES:
+            self.capabilities[capability] = None
+        if self.active_devices("BATTERY"):
+            # A battery that once returned nothing may report now.
+            self.capabilities["storage"] = None
+        self._forget_retired_devices()
         self._schedule_save()
+
+    def active_devices(self, device_type: str) -> list[Device]:
+        """Inventory devices of a type that were not removed or replaced."""
+        return [d for d in self.devices if d.type == device_type and d.active]
+
+    @callback
+    def _forget_retired_devices(self) -> None:
+        """Drop stored values of devices the inventory no longer lists as active."""
+        for device_type, stored in (
+            ("BATTERY", self.battery_values),
+            ("BATTERY", self.battery_status),
+            ("BATTERY", self.soc_scales),
+            ("INVERTER", self.inverter_status),
+            ("EV_CHARGER", self.ev_values),
+            ("SENSOR", self.sensor_values),
+        ):
+            active = {device.serial_number for device in self.active_devices(device_type)}
+            if active:
+                for serial in set(stored) - active:
+                    del stored[serial]
+
+    @callback
+    def _migrate_battery_serials(self) -> None:
+        """Move batteries from a long serial to the short one the API now reports.
+
+        Energy Bank serials lost their suffix (ABC-16 became ABC), which created a
+        second device. The original has the history, area and entity IDs, so it
+        takes over the short serial and the duplicate goes.
+        """
+        devices, entities = dr.async_get(self.hass), er.async_get(self.hass)
+        serials = self.battery_serials
+        registered = {
+            serial: device
+            for device in dr.async_entries_for_config_entry(devices, self.config_entry.entry_id)
+            for domain, serial in device.identifiers
+            if domain == DOMAIN
+        }
+
+        def _entities_of(device_id: str) -> list[er.RegistryEntry]:
+            return er.async_entries_for_device(entities, device_id, include_disabled_entities=True)
+
+        for long_serial, device in registered.items():
+            short_serial = long_serial.rpartition("-")[0]
+            if short_serial not in serials:
+                continue
+            if duplicate := registered.get(short_serial):
+                for entity in _entities_of(duplicate.id):
+                    entities.async_remove(entity.entity_id)
+                devices.async_remove_device(duplicate.id)
+            for entity in _entities_of(device.id):
+                entities.async_update_entity(
+                    entity.entity_id,
+                    new_unique_id=entity.unique_id.replace(long_serial, short_serial),
+                )
+            devices.async_update_device(device.id, new_identifiers={(DOMAIN, short_serial)})
 
     @callback
     def _register_devices(self) -> None:
         registry = dr.async_get(self.hass)
         site_identifier = (DOMAIN, str(self.site_id))
-        registry.async_get_or_create(
+        self.site_device_id = registry.async_get_or_create(
             config_entry_id=self.config_entry.entry_id,
             identifiers={site_identifier},
             name=self.site_name,
             manufacturer="SolarEdge",
             model="Monitoring site",
             configuration_url=MONITORING_URL,
-        )
-        # Battery devices are created by their entities. Anything else (inverters,
-        # meters, retired batteries) has no entities and would sit empty.
-        keep = {site_identifier} | {(DOMAIN, serial) for serial in self.battery_serials}
+        ).id
+        # Devices are created by their entities. Anything else (meters, retired
+        # batteries) has no entities and would sit empty.
+        serials = {*self.battery_serials, *self.ev_charger_serials, *self.inverter_status}
+        keep = {site_identifier} | {(DOMAIN, serial) for serial in serials}
         for device in dr.async_entries_for_config_entry(registry, self.config_entry.entry_id):
             if not device.identifiers & keep:
-                registry.async_update_device(
-                    device.id, remove_config_entry_id=self.config_entry.entry_id
-                )
+                registry.async_remove_device(device.id)
 
     @property
     def battery_serials(self) -> list[str]:
-        """Batteries that report telemetry (or, before the first poll, the inventory)."""
-        if self.battery_values:
-            return list(self.battery_values)
-        return [device.serial_number for device in self.devices if device.type == "BATTERY"]
+        """Active batteries in the inventory, plus any only telemetry knows about."""
+        active = [device.serial_number for device in self.active_devices("BATTERY")]
+        return active + [serial for serial in self.battery_values if serial not in active]
 
-    def battery_device(self, serial: str) -> Device | None:
-        """Inventory record for a battery serial."""
+    @property
+    def ev_charger_serials(self) -> list[str]:
+        """Active EV chargers in the inventory."""
+        return [device.serial_number for device in self.active_devices("EV_CHARGER")]
+
+    def inventory_device(self, serial: str) -> Device | None:
+        """Inventory record for a serial."""
         return next((d for d in self.devices if d.serial_number == serial), None)
 
     # --- Planning ------------------------------------------------------------
@@ -420,6 +586,7 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             energy_calls=self.energy_calls,
             is_day=is_up(self.hass),
             day_hours=self._day_hours(),
+            status_calls=self.status_calls,
         )
 
     # --- Update --------------------------------------------------------------
@@ -440,9 +607,14 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             if is_due(self.last_power, self.poll_plan.power_interval, now):
                 await self._async_fetch_power(now)
                 self.last_power = now
-            if is_due(self.last_energy, self.poll_plan.energy_interval, now):
-                await self._async_fetch_energy(now)
+            # A long gap is walked one window per tick, so stay due until caught up.
+            if is_due(
+                self.last_energy, self.poll_plan.energy_interval, now
+            ) and await self._async_fetch_energy(now):
                 self.last_energy = now
+            if is_due(self.last_status, self.poll_plan.status_interval, now):
+                await self._async_fetch_status(now)
+                self.last_status = now
         except (SolarEdgeAuthError, OAuth2TokenRequestReauthError) as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except SolarEdgeCreditLimitError:
@@ -489,6 +661,21 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
         if ts and (self.data_timestamp is None or ts > self.data_timestamp):
             self.data_timestamp = ts
 
+    async def _optional[T](
+        self, capability: str, call: Callable[..., Awaitable[T]], *args: datetime
+    ) -> T | None:
+        """Call an endpoint not every site allows, without failing the whole update."""
+        if self.capabilities[capability] is False:
+            return None
+        try:
+            result = await call(self.site_id, *args)
+        except (SolarEdgeBadRequestError, SolarEdgeForbiddenError, SolarEdgeNotFoundError) as err:
+            _LOGGER.warning("Skipping %s until the next inventory refresh: %s", capability, err)
+            self.capabilities[capability] = False
+            return None
+        self.capabilities[capability] = True
+        return result
+
     async def _async_fetch_power(self, now: datetime) -> None:
         start = now - TELEMETRY_LOOKBACK
         values: dict[str, float] = {}
@@ -531,7 +718,8 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
                         self._set_timestamp(latest[0])
                 totals, per_battery = battery_state(storage, self.soc_scales)
                 values.update(totals)
-                self.battery_values.update(per_battery)
+                if per_battery:
+                    self.battery_values = per_battery
                 self.raw_storage = {
                     serial: {
                         metric: {
@@ -543,6 +731,22 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
                     for serial, metrics in storage.devices.items()
                 }
 
+        if self.has_ev_charger:
+            chargers = await self._optional(
+                "ev_chargers", self.client.get_ev_charger_telemetry, start, now
+            )
+            for serial, metrics in (chargers.devices if chargers else {}).items():
+                charger = self.ev_values.setdefault(serial, {})
+                # Null means no data rather than zero, so an old reading must not linger.
+                if series := metrics.get("chargingPower"):
+                    charger["power"] = series[-1][1]
+                else:
+                    charger.pop("power", None)
+
+        if self.has_env_sensors:
+            readings = await self._optional("sensors", self.client.get_sensor_telemetry, start, now)
+            self.sensor_values.update(readings or {})
+
         if "grid_import_power" in values or "grid_export_power" in values:
             values["grid_power"] = values.get("grid_import_power", 0.0) - values.get(
                 "grid_export_power", 0.0
@@ -553,13 +757,15 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             )
         self.values.update(values)
 
-    async def _async_fetch_energy(self, now: datetime) -> None:
+    async def _async_fetch_energy(self, now: datetime) -> bool:
+        """Fetch one counter window; return False while there is more to catch up on."""
         start = (
             self.counter_cursor - timedelta(hours=1)
             if self.counter_cursor
-            else now - COUNTER_BACKFILL
+            else now - MAX_QUERY_WINDOW
         )
-        start = max(start, now - COUNTER_MAX_WINDOW)
+        start = max(start, now - COUNTER_MAX_CATCHUP)
+        end = min(start + MAX_QUERY_WINDOW, now)
         counters: dict[str, dict[str, Series]] = {}
 
         def _collect(readings: CounterReadings, mapping: dict[str, str]) -> None:
@@ -570,23 +776,28 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
         if self.capabilities["meters"] is not False:
             try:
                 _collect(
-                    await self.client.get_meter_lifetime_energy(self.site_id, start, now),
+                    await self.client.get_meter_lifetime_energy(self.site_id, start, end),
                     METER_COUNTER_KEYS,
                 )
             except SolarEdgeForbiddenError:
                 _LOGGER.warning("Meter counters not permitted; using site lifetime energy")
                 self.capabilities["meters"] = False
 
-        self.capabilities["site_lifetime"] = "solar" not in counters
-        if self.capabilities["site_lifetime"]:
-            _, energy = await self.client.get_site_lifetime_energy(self.site_id)
-            if energy is not None:
-                self.values["solar_energy"] = energy
+        # Mixing inverter and meter counters would step the total, so a site with a
+        # production meter sticks to it even through a window without readings.
+        self.capabilities["inverter_lifetime"] = (
+            "solar" not in counters and not self.has_production_meter
+        )
+        if self.capabilities["inverter_lifetime"]:
+            _collect(
+                await self.client.get_inverter_lifetime_energy(self.site_id, start, end),
+                INVERTER_COUNTER_KEYS,
+            )
 
         if self.has_battery:
             try:
                 _collect(
-                    await self.client.get_storage_lifetime_energy(self.site_id, start, now),
+                    await self.client.get_storage_lifetime_energy(self.site_id, start, end),
                     STORAGE_COUNTER_KEYS,
                 )
             except SolarEdgeForbiddenError:
@@ -597,11 +808,38 @@ class SolarEdgeCoordinator(DataUpdateCoordinator[dict[str, float]]):
             last_points = [series[-1] for series in series_by_device.values() if series]
             if not last_points:
                 continue
-            self.values[f"{key}_energy"] = sum(value for _, value in last_points)
+            self.values[f"{key}_energy"] = steady_total(
+                self.values.get(f"{key}_energy"), sum(value for _, value in last_points)
+            )
             latest_per_key.append(min(ts for ts, _ in last_points))
         if latest_per_key:
             self.counter_cursor = min(latest_per_key)
 
-        # The site counter has no history window, so only per-device counters
-        # become hourly statistics.
         async_import_counters(self.hass, self.site_id, self.site_name, counters, self.counter_state)
+
+        if end < now:
+            # Step from the window's end, not the last reading: a device that went quiet
+            # would otherwise pin the cursor and the walk would never finish.
+            self.counter_cursor = end
+            return False
+
+        if self.has_ev_charger:
+            totals = await self._optional(
+                "ev_chargers", self.client.get_ev_charger_lifetime_energy, now
+            )
+            for serial, energy in (totals or {}).items():
+                self.ev_values.setdefault(serial, {})["energy"] = energy
+        return True
+
+    async def _async_fetch_status(self, now: datetime) -> None:
+        # Inverters sleep at night and samples are sparse, so look as far back as allowed.
+        start = now - MAX_QUERY_WINDOW
+        status = await self._optional(
+            "inverter_status", self.client.get_inverter_status, start, now
+        )
+        merge_status(self.inverter_status, status or {}, INVERTER_STATUS_KEYS)
+        if self.has_battery:
+            status = await self._optional(
+                "storage_status", self.client.get_storage_status, start, now
+            )
+            merge_status(self.battery_status, status or {}, STORAGE_STATUS_KEYS)
